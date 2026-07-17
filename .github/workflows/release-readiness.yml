@@ -1,0 +1,157 @@
+name: Release Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.44.0'
+
+jobs:
+  metadata-audit:
+    name: Dependency and license audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Audit dependency sources and licenses
+        run: dart run tool/release_metadata.dart
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: google-code-release-metadata
+          path: build/release-metadata/
+          retention-days: 14
+          if-no-files-found: error
+
+  macos-release:
+    name: macOS unsigned release build
+    needs: metadata-audit
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build macOS unsigned release
+        run: flutter build macos --release
+
+      - name: Generate release metadata
+        run: dart run tool/release_metadata.dart
+
+      - name: Package macOS unsigned release
+        shell: bash
+        run: |
+          mkdir -p build/release-package/macos build/release-artifacts
+          cp -R build/macos/Build/Products/Release/google_code.app build/release-package/macos/
+          cp build/release-metadata/dependency-manifest.json build/release-package/macos/
+          cp build/release-metadata/THIRD_PARTY_NOTICES.txt build/release-package/macos/
+          printf '%s\n' \
+            'Google Code unsigned release readiness artifact' \
+            '' \
+            'This build is not signed with an Apple Developer ID certificate or notarized.' \
+            'Xcode may apply an ad hoc signature that does not authenticate the publisher.' \
+            'Use it only for release preparation and trusted-device acceptance testing.' \
+            'The SHA-256 checksum verifies download integrity; it does not authenticate the publisher.' \
+            > build/release-package/macos/UNSIGNED_BUILD.txt
+          tar -czf build/release-artifacts/google-code-macos-unsigned-release.tar.gz \
+            -C build/release-package/macos .
+          cd build/release-artifacts
+          shasum -a 256 google-code-macos-unsigned-release.tar.gz \
+            > google-code-macos-unsigned-release.tar.gz.sha256
+
+      - name: Upload macOS unsigned release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: google-code-macos-unsigned-release
+          path: |
+            build/release-artifacts/google-code-macos-unsigned-release.tar.gz
+            build/release-artifacts/google-code-macos-unsigned-release.tar.gz.sha256
+          retention-days: 14
+          if-no-files-found: error
+
+  windows-release:
+    name: Windows unsigned release build
+    needs: metadata-audit
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows unsigned release
+        run: flutter build windows --release
+
+      - name: Generate release metadata
+        run: dart run tool/release_metadata.dart
+
+      - name: Package Windows unsigned release
+        shell: pwsh
+        run: |
+          $staging = 'build/release-package/windows'
+          $artifacts = 'build/release-artifacts'
+          New-Item -ItemType Directory -Force -Path $staging, $artifacts | Out-Null
+          Copy-Item 'build/windows/x64/runner/Release' "$staging/app" -Recurse
+          Copy-Item 'build/release-metadata/dependency-manifest.json' $staging
+          Copy-Item 'build/release-metadata/THIRD_PARTY_NOTICES.txt' $staging
+          @(
+            'Google Code unsigned release readiness artifact'
+            ''
+            'This build is not code signed.'
+            'Use it only for release preparation and trusted-device acceptance testing.'
+            'The SHA-256 checksum verifies download integrity; it does not authenticate the publisher.'
+          ) | Set-Content -Encoding utf8 "$staging/UNSIGNED_BUILD.txt"
+          $archive = "$artifacts/google-code-windows-unsigned-release.zip"
+          Compress-Archive -Path "$staging/*" -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          "$hash  google-code-windows-unsigned-release.zip" |
+            Set-Content -Encoding ascii "$archive.sha256"
+
+      - name: Upload Windows unsigned release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: google-code-windows-unsigned-release
+          path: |
+            build/release-artifacts/google-code-windows-unsigned-release.zip
+            build/release-artifacts/google-code-windows-unsigned-release.zip.sha256
+          retention-days: 14
+          if-no-files-found: error
