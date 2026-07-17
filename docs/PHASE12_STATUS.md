@@ -128,3 +128,9 @@ Windows 分享代码的 `TypedEventHandler` 模板缺少完整的 Windows Founda
 2. 在可用 Windows 10/11 设备上下载 CI 产物，完成启动、截图、安全存储、设备认证、系统事件和系统分享人工验收。
 3. 后续发布阶段增加 Release 构建、macOS 签名/公证、Windows 代码签名和安装包。
 4. 增加依赖审计、许可证清单和发布产物校验值。
+
+## 阶段 13 后续进展
+
+- 阶段 13 已实现 macOS/Windows 摄像头二维码扫描 PoC，统一支持标准 `otpauth://` 和 Google Authenticator 迁移二维码导入。
+- `camera` + `camera_desktop` 已通过 Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建；实现提交对应 GitHub Actions 运行 `29564583502`。
+- 摄像头真实扫码尚未完成人工验收，Windows 10/11 真机平台能力矩阵仍需继续执行；详见 `docs/PHASE13_STATUS.md`。
