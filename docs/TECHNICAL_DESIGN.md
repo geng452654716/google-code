@@ -1,0 +1,1298 @@
+# Google Code 桌面动态验证码生成器技术设计文档
+
+- 文档版本：v0.2（阶段 9 实现同步）
+- 编写日期：2026-07-16
+- 对应需求：`docs/PRD.md` v0.1
+- 推荐技术栈：Flutter Desktop + Dart
+- 推荐首发平台：macOS、Windows
+- 系统形态：纯本地离线桌面应用，无后端服务
+
+## 1. 文档目的
+
+本文档将产品需求转化为可实施的软件架构，重点覆盖：
+
+- TOTP 动态验证码的正确实现。
+- 本地密钥加密、主密码和设备认证快速解锁。
+- 图片、剪贴板、区域截图、摄像头二维码导入。
+- Google Authenticator 迁移二维码解析。
+- 单个账号 Secret、`otpauth://` 链接和二维码安全分享。
+- macOS、Windows 平台能力适配。
+- 模块拆分、数据格式、测试、构建和发布。
+
+本文档用于指导工程初始化、任务拆分、代码评审和验收。尚未确认的产品选择以“技术假设”方式记录，实施前可以通过 ADR 修订。
+
+## 2. 技术假设
+
+当前方案基于以下假设：
+
+1. 首发目标为 **macOS + Windows**，Linux 暂不纳入首版验收。
+2. 使用 Flutter Desktop；界面和业务逻辑共用 Dart，系统能力通过插件或自有 Platform Channel 适配。
+3. P0 必须支持主密码；Touch ID、Windows Hello 或设备凭据作为 P1 快速解锁和敏感操作重新认证能力。
+4. 数据不上传服务器，应用运行不依赖网络。
+5. TOTP 默认参数为 SHA-1、6 位、30 秒，同时兼容 URI 中合法的 SHA-256、SHA-512、8 位和其他周期。
+6. P0 支持图片、剪贴板和区域截图导入；摄像头扫描在 P1 实现。
+7. 单个账号分享暂列 P1；包含 Secret、`otpauth://` 链接、二维码、保存图片和平台允许时调用系统分享面板。
+8. 首版不允许 CSV/JSON 明文批量导出，只提供加密备份。
+9. 一个账号只属于一个分组，后续如需要多分组再升级数据模型。
+10. 账号规模目标为 1000 条，优先使用整体加密 Vault 文件，而不是数据库。
+
+## 3. 技术选型结论
+
+### 3.1 推荐 Flutter Desktop
+
+选择 Flutter 的主要原因：
+
+- 官方支持构建原生 macOS、Windows 和 Linux 桌面应用。
+- 单一 UI 代码库适合本项目的个人工具定位。
+- Dart 业务层适合实现 TOTP、URI 解析、加密文件和二维码解析。
+- `local_auth` 官方插件已覆盖 macOS 和 Windows。
+- 截图、剪贴板、安全存储等能力可以隔离在平台适配层，后续替换插件不会影响领域层。
+- 用户后续如扩展移动端，可以复用大部分领域逻辑和 UI 组件。
+
+### 3.2 不选择 Electron 作为首选
+
+Electron 对摄像头、剪贴板和屏幕捕获支持较直接，但存在以下取舍：
+
+- 安装包和运行时资源占用通常更大。
+- 需要额外控制 Node.js、Renderer、IPC 和内容安全策略的攻击面。
+- 系统设备认证和密钥安全存储仍需要平台能力。
+- 本项目不需要 Web 技术生态或在线内容加载。
+
+如果 Flutter 的 Windows 摄像头能力在 P1 技术验证中无法满足要求，可以重新评估 Electron，但不建议因此阻塞 P0。
+
+### 3.3 不选择 Tauri 作为首选
+
+Tauri 安装体积和权限模型较好，但该方案会同时引入 Rust、Web 前端和平台插件维护，团队需要维护更多语言边界。本项目核心算法和 UI 均可在 Dart 内完成，因此首版不优先采用。
+
+## 4. 开发基线
+
+### 4.1 SDK
+
+- Flutter：以 2026-07-16 官方稳定版本为基线，建议项目初始化时固定到 Flutter 3.44.x 或当日最新稳定版。
+- Dart：使用所选 Flutter SDK 内置版本。
+- macOS 最低版本：建议 macOS 12；最终以插件兼容性和签名要求确认。
+- Windows 最低版本：建议 Windows 10 19041；最终以设备认证、截图和摄像头适配结果确认。
+- 架构：macOS arm64/x64，Windows x64；Windows arm64 后置。
+
+当前开发机检测到的 Flutter 路径位于 `/opt/homebrew/Caskroom/flutter/3.7.3/`，版本明显过旧。开始开发前应升级并通过 FVM 或等价方式将 SDK 版本固定在项目内。
+
+### 4.2 版本固定
+
+建议提交以下文件：
+
+- `.fvmrc`：固定 Flutter SDK。
+- `pubspec.lock`：应用项目必须提交依赖锁文件。
+- CI 使用与 `.fvmrc` 一致的版本。
+- 升级 Flutter 或安全相关依赖时单独提交，并运行完整回归测试。
+
+## 5. 总体架构
+
+采用“领域层无平台依赖 + 功能模块化 + 平台适配器”的本地单体架构。
+
+```mermaid
+flowchart TB
+    UI["Flutter UI"] --> State["Application State / Riverpod"]
+    State --> UseCases["Application Use Cases"]
+    UseCases --> Domain["Domain Services"]
+    Domain --> Totp["TOTP Engine"]
+    Domain --> Import["Import Pipeline"]
+    Domain --> Share["Share Service"]
+    Domain --> VaultRepo["Vault Repository"]
+    VaultRepo --> Crypto["Crypto Service"]
+    VaultRepo --> FileStore["Atomic Vault File Store"]
+    UseCases --> Platform["Platform Capability Interfaces"]
+    Platform --> Mac["macOS Adapter"]
+    Platform --> Win["Windows Adapter"]
+    Mac --> OS1["Keychain / Touch ID / Screen Capture / Share"]
+    Win --> OS2["Credential Store / Windows Hello / Screen Capture / Share"]
+```
+
+### 5.1 分层职责
+
+#### Presentation
+
+- 页面、对话框、列表和交互状态。
+- 不直接读写文件、调用加密 API 或访问平台插件。
+- 不持有长期明文 Secret。
+
+#### Application
+
+- 编排解锁、导入、保存、分享、备份和恢复用例。
+- 维护当前会话状态和自动锁定。
+- 将领域错误转换为用户可理解的错误状态。
+
+#### Domain
+
+- Account、Group、Vault 等实体。
+- TOTP 计算、Base32、`otpauth://` 解析和生成。
+- 重复项判断、导入校验、Google 迁移数据归一化。
+- 不依赖 Flutter Widget 和具体插件。
+
+#### Infrastructure
+
+- Vault 文件读写和迁移。
+- AES-GCM、Argon2id、随机数和密钥包装。
+- QR 图片解码、生成和图片预处理。
+- 日志、安全存储和本地设置。
+
+#### Platform
+
+- 区域截图、剪贴板图片、摄像头、系统分享面板。
+- 设备认证、系统锁屏事件、窗口失焦保护。
+- 插件或自有原生代码只从该层暴露接口。
+
+## 6. 推荐项目结构
+
+```text
+google-code/
+├── docs/
+│   ├── PRD.md
+│   ├── TECHNICAL_DESIGN.md
+│   └── adr/
+├── lib/
+│   ├── main.dart
+│   ├── app/
+│   │   ├── app.dart
+│   │   ├── bootstrap.dart
+│   │   ├── router.dart
+│   │   └── theme/
+│   ├── core/
+│   │   ├── errors/
+│   │   ├── logging/
+│   │   ├── result/
+│   │   ├── security/
+│   │   └── utils/
+│   ├── domain/
+│   │   ├── entities/
+│   │   ├── repositories/
+│   │   ├── services/
+│   │   └── value_objects/
+│   ├── data/
+│   │   ├── vault/
+│   │   ├── crypto/
+│   │   ├── import/
+│   │   ├── backup/
+│   │   └── settings/
+│   ├── platform/
+│   │   ├── authentication/
+│   │   ├── clipboard/
+│   │   ├── screen_capture/
+│   │   ├── camera/
+│   │   ├── sharing/
+│   │   └── session_lock/
+│   └── features/
+│       ├── onboarding/
+│       ├── unlock/
+│       ├── accounts/
+│       ├── import_accounts/
+│       ├── groups/
+│       ├── share_account/
+│       ├── backup_restore/
+│       └── settings/
+├── test/
+│   ├── unit/
+│   ├── fixtures/
+│   ├── golden/
+│   └── security/
+├── integration_test/
+├── macos/
+├── windows/
+├── pubspec.yaml
+└── .fvmrc
+```
+
+## 7. 核心接口设计
+
+通过抽象接口隔离业务和具体插件：
+
+```dart
+abstract interface class TotpService {
+  String generate(TotpConfig config, DateTime timestamp);
+  int remainingSeconds(TotpConfig config, DateTime timestamp);
+}
+
+abstract interface class VaultRepository {
+  Future<VaultStatus> inspect();
+  Future<UnlockedVault> create(NewVaultRequest request);
+  Future<UnlockedVault> unlock(UnlockCredential credential);
+  Future<void> save(UnlockedVault vault);
+  Future<void> lock();
+}
+
+abstract interface class QrDecoder {
+  Future<List<DecodedQrPayload>> decodeImage(Uint8List bytes);
+}
+
+abstract interface class ScreenCaptureService {
+  Future<Uint8List?> captureRegion();
+  Future<void> openPermissionSettings();
+}
+
+abstract interface class ClipboardService {
+  Future<ClipboardPayload?> read();
+  Future<void> writeSensitiveText(String text, Duration ttl);
+  Future<void> writeImage(Uint8List pngBytes);
+}
+
+abstract interface class ReauthenticationService {
+  Future<bool> verify(ReauthenticationReason reason);
+}
+
+abstract interface class AccountShareService {
+  Future<ShareMaterial> prepare(AccountId accountId);
+  Future<ShareResult> share(ShareRequest request);
+}
+```
+
+接口返回领域结果，不向上层暴露插件异常、临时文件路径或平台原始对象。
+
+## 8. 领域模型
+
+### 8.1 Account
+
+```dart
+class Account {
+  final String id;
+  final String issuer;
+  final String accountName;
+  final SecretBytes secret;
+  final TotpAlgorithm algorithm;
+  final int digits;
+  final int periodSeconds;
+  final String? groupId;
+  final int sortOrder;
+  final bool isPinned;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? lastUsedAt;
+}
+```
+
+约束：
+
+- `id` 使用随机 UUID，不从账号信息派生。
+- `secret` 只存在于已解锁内存模型，序列化前由 Vault 整体加密。
+- `digits` 首版接受 6 或 8。
+- `periodSeconds` 必须在合理范围内，例如 5 至 300 秒。
+- `issuer` 与 `accountName` 去除首尾空白，但不擅自修改用户可见内容。
+
+### 8.2 Group
+
+- `id`
+- `name`
+- `sortOrder`
+- `createdAt`
+- `updatedAt`
+
+删除分组只解除账号关联，不删除账号。
+
+### 8.3 VaultPayload
+
+```json
+{
+  "schemaVersion": 1,
+  "accounts": [],
+  "groups": [],
+  "preferences": {},
+  "createdAt": "2026-07-16T00:00:00Z",
+  "updatedAt": "2026-07-16T00:00:00Z"
+}
+```
+
+以上 JSON 仅表示解密后的逻辑结构，磁盘上不得以明文保存。
+
+## 9. TOTP 引擎
+
+### 9.1 实现标准
+
+TOTP 计算遵循 RFC 6238，并复用 HOTP 的动态截断规则：
+
+```text
+counter = floor((unixTimeSeconds - T0) / period)
+message = counter 的 8 字节大端表示
+hash = HMAC(secret, message)
+offset = hash[last] & 0x0f
+binary = dynamicTruncate(hash, offset)
+code = binary mod 10^digits
+```
+
+支持：
+
+- HMAC-SHA-1。
+- HMAC-SHA-256。
+- HMAC-SHA-512。
+- 6 位和 8 位验证码。
+- 默认周期 30 秒，兼容 URI 中的其他合法周期。
+
+### 9.2 实现策略
+
+不依赖功能复杂的 OTP 第三方包，使用 `cryptography` 的 HMAC 能力实现小型、可审计的 TOTP 引擎，并用 RFC 测试向量验证。
+
+原因：
+
+- 算法本身规模小。
+- 降低关键安全逻辑的供应链依赖。
+- 可以严格控制参数校验和错误类型。
+- 便于覆盖 RFC 官方测试向量。
+
+### 9.3 时间与刷新
+
+- 使用系统 UTC 时间计算验证码。
+- 全应用只使用一个共享 ticker，不为每一行创建 Timer。
+- 每 250 至 500 毫秒更新倒计时进度，但只在时间步变化时重新计算 HMAC。
+- 账号列表缓存当前时间步的验证码。
+- 通过单调时钟与系统墙钟差异检测明显的时间跳变；发现跳变时提示用户检查系统时间。
+- 不通过网络自动校时，保持离线承诺。
+
+## 10. Base32 与 `otpauth://` URI
+
+### 10.1 Base32
+
+解析时：
+
+- 接受大小写字母。
+- 去除空格、短横线和可选的 `=` padding。
+- 拒绝 Base32 字母表之外的字符。
+- 空密钥或解码后长度过短时给出校验错误。
+- 原始输入不得写入日志。
+
+### 10.2 URI 解析
+
+接受：
+
+```text
+otpauth://totp/{label}?secret=...&issuer=...&algorithm=SHA1&digits=6&period=30
+```
+
+规则：
+
+- scheme 必须是 `otpauth`。
+- host 必须是 `totp`；HOTP 首版返回“不支持的类型”。
+- `secret` 必填。
+- 正确进行 URL percent decoding。
+- label 中常见的 `issuer:account` 形式需要解析。
+- query issuer 与 label issuer 不一致时提示用户确认，不静默覆盖。
+- 未提供参数时使用 SHA-1、6 位、30 秒默认值。
+- 未识别参数可以保留在诊断对象中，但不参与生成。
+
+### 10.3 URI 生成
+
+分享时生成规范化 URI：
+
+- label 和 query 参数正确编码。
+- issuer 同时写入 label 前缀和 `issuer` 参数以提高兼容性。
+- Secret 使用无空格的大写 Base32。
+- 非默认算法、位数和周期必须显式写入。
+
+## 11. 二维码导入架构
+
+所有二维码入口统一进入同一条解析管线：
+
+```mermaid
+flowchart LR
+    Source["文件 / 剪贴板 / 截图 / 摄像头"] --> Bytes["标准化图片或二维码文本"]
+    Bytes --> Limits["大小与格式限制"]
+    Limits --> Preprocess["旋转 / 缩放 / 对比度预处理"]
+    Preprocess --> Decode["QR Decoder"]
+    Decode --> Classify["Payload Classifier"]
+    Classify --> Otp["otpauth Parser"]
+    Classify --> Migration["Google Migration Parser"]
+    Otp --> Normalize["Account Normalizer"]
+    Migration --> Normalize
+    Normalize --> Dedupe["重复检查"]
+    Dedupe --> Confirm["导入确认"]
+```
+
+### 11.1 图片限制
+
+为了避免异常图片造成内存耗尽：
+
+- 默认最大文件大小 20 MB。
+- 默认最大解码像素数 40 MP。
+- 读取图片元数据后再决定是否完整解码。
+- 超大图片先等比缩放。
+- 解码和预处理放入 Dart isolate，避免阻塞 UI。
+
+### 11.2 解码策略
+
+推荐使用：
+
+- `image`：图片格式解码和预处理。
+- `zxing2`：二维码识别。
+- `qr`：分享二维码的矩阵生成。
+
+解码尝试顺序：
+
+1. 原图。
+2. 等比缩放后的图。
+3. 旋转 90、180、270 度。
+4. 灰度与增强对比度。
+5. 反色图像。
+
+每种策略设置处理上限，避免低质量图片触发过长计算。
+
+### 11.3 文件导入
+
+- 使用官方 `file_selector` 选择图片。
+- 只读取用户选中的文件。
+- 不修改源文件。
+- 文件路径不得写入普通日志；诊断日志最多记录扩展名和脱敏后的错误类型。
+
+### 11.4 剪贴板导入
+
+- 在导入页响应 `Cmd+V` / `Ctrl+V`。
+- 优先读取图片；没有图片时再尝试读取文本 URI。
+- 当前实现将自有 Platform Channel 封装在 `ClipboardImportReader` 后，不引入额外剪贴板图片插件。
+- macOS 使用 `NSPasteboard` 读取 PNG/TIFF；Windows 读取 `CF_DIBV5` / `CF_DIB` 并包装为内存 BMP。
+- 不能全局监听用户剪贴板。
+
+### 11.5 区域截图
+
+当前实现使用自有 Platform Channel，并统一封装在 `ScreenCaptureService` 后：
+
+1. macOS 通过 `CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess` 检查和请求屏幕录制权限。
+2. 调用系统 `screencapture -i -s -c -x` 区域选择器前隐藏自身窗口。
+3. 截图成功后直接从 `NSPasteboard` 读取 PNG/TIFF 内存数据，不创建应用临时文件。
+4. 通过 pasteboard `changeCount` 识别取消；成功、取消和失败均恢复并激活应用窗口。
+5. 权限被拒绝时显示解释，并可打开“隐私与安全性 > 屏幕录制”设置。
+6. 截图字节复用图片限制、QR 识别、统一确认、重复检测和 Vault 保存流程。
+
+Windows 使用自有 GDI 区域选择器，不依赖 Snipping Tool URI：
+
+1. 隐藏主窗口后用 `BitBlt` + `CAPTUREBLT` 捕获完整虚拟桌面到 32 位 top-down DIB。
+2. 创建置顶无边框遮罩，支持鼠标正向/反向拖动、`Esc` 和右键取消。
+3. 选区直接编码为内存 BMP，不写临时文件、不修改剪贴板。
+4. 使用 RAII 恢复窗口和释放 GDI 对象，并在释放前清理完整桌面像素缓冲。
+5. Windows 不需要屏幕录制权限设置页，但必须在 Windows 10/11、混合 DPI 和多显示器环境验证。
+
+不能把已废弃的旧版 Snipping Tool URI 作为正式方案。macOS App Sandbox、TCC 首次授权和多显示器交互同样必须在发布形态人工验收。
+
+### 11.6 摄像头扫描
+
+摄像头是 P1 中平台风险最高的模块，应在阶段 2 开始前单独完成技术验证。
+
+推荐实现：
+
+- macOS：通过自有 Flutter 插件封装 AVFoundation，优先使用元数据输出直接识别二维码文本。
+- Windows：通过自有 Flutter 插件封装 Media Foundation/MediaCapture，并结合 ZXing-C++ 或可验证的本地二维码库。
+- Dart 层只接收二维码文本、扫描状态和权限状态，不持续传输大尺寸视频帧。
+- 扫描成功后立即暂停，防止同一二维码重复触发。
+- 页面关闭后释放摄像头和原生会话。
+
+不直接依赖官方 `camera` 包完成桌面摄像头，因为其当前主包支持范围不包含 macOS 和 Windows；桌面摄像头必须通过专项验证后选定实现。
+
+## 12. Google Authenticator 迁移二维码
+
+Google Authenticator 批量迁移二维码通常使用：
+
+```text
+otpauth-migration://offline?data={base64url protobuf payload}
+```
+
+### 12.1 模块隔离
+
+当前实现按协议解析、导入分类、批量确认和页面编排分层：
+
+```text
+lib/
+├── domain/import/google_authenticator_migration.dart
+├── application/import/otp_import_service.dart
+├── features/accounts/google_migration_import_dialog.dart
+└── features/accounts/accounts_page.dart
+```
+
+- `GoogleAuthenticatorMigrationCodec` 使用有长度、数量和字段边界的只读 Protobuf wire reader，不依赖 `.proto` 生成模型，也不引入 `protobuf` package。
+- 解码结果立即映射为 `GoogleMigrationEntry`；有效条目只通过 `OtpImportCandidate` 进入后续业务流程，无效条目仅保留安全展示信息和错误原因。
+- 原始迁移 URI、Base64URL 文本和完整 Protobuf payload 不进入 UI 或持久化层，也不写日志或临时文件。
+- 该格式没有稳定公开的正式兼容承诺；当前固定 fixtures 已覆盖协议和界面闭环，发布前仍须使用 Google Authenticator 真实导出样本回归。
+
+### 12.2 多二维码批次
+
+`GoogleMigrationBatchAccumulator` 按以下字段管理当前批次：
+
+- batch ID。
+- batch size。
+- batch index。
+- payload version。
+
+当前实现：
+
+- 同一批次允许任意顺序读取，已读取的 index 不重复计数。
+- 缺少部分二维码时显示 `已读取 N/M 张`，不能进入完整批量确认，也不会写入 Vault。
+- 图片、区域截图和剪贴板入口可以跨入口继续收集同一批次。
+- 扫描到其他批次时不覆盖当前未完成批次，用户必须继续当前批次或先取消。
+- 批次内容只保存在当前已解锁页面的内存中；页面销毁、应用锁定或退出后不恢复进度。
+- 用户取消批次时释放页面持有的迁移条目和 Secret 引用。
+
+### 12.3 算法映射
+
+迁移数据中的算法、位数和类型使用显式数值映射：
+
+- algorithm `0/1` 映射为 SHA-1，`2` 映射为 SHA-256，`3` 映射为 SHA-512。
+- digits `0/1` 映射为 6 位，`2` 映射为 8 位。
+- type `2` 映射为 TOTP。
+- HOTP、MD5、未知算法、未知位数、未知类型和空 Secret 保留为无效条目，不静默降级或错误导入。
+
+### 12.4 批量确认与事务保存
+
+- 完整批次进入独立确认对话框，只展示发行方、账号名称、算法、位数、周期和状态，不展示 Secret。
+- 有效且非重复条目默认勾选；当前 Vault 已存在项和批次内重复项默认跳过，但用户可明确勾选以保留副本。
+- 无效条目禁用选择并展示错误原因；支持全选有效项、全部取消和逐项选择。
+- 用户确认后调用 `VaultSessionController.addAccounts`，先规范化全部草稿，再通过一次 `_persistAccounts` 完成单次加密持久化，避免逐条写入产生中间状态。
+- 导入完成后汇总成功、跳过和无效数量；当前不提供用迁移项更新既有账号展示信息的独立操作。
+
+## 13. 本地 Vault 设计
+
+### 13.1 为什么不使用 SQLite
+
+首版目标上限约 1000 个账号，解密后的数据量预计很小。使用整体加密文件有以下优势：
+
+- issuer、账号名称、分组等元数据也全部加密。
+- 不需要为每个字段设计 nonce、密钥版本和查询索引。
+- 避免 SQLite 临时文件、WAL 和备份残留明文。
+- 备份、恢复和格式迁移更直接。
+- 搜索和排序可以在解锁后的内存中完成。
+
+如果未来账号达到数万条、引入历史审计或增量同步，再评估加密数据库。
+
+### 13.2 加密模型
+
+使用信封加密：
+
+```mermaid
+flowchart LR
+    Password["Master Password"] --> KDF["Argon2id"]
+    Salt["Random Salt"] --> KDF
+    KDF --> KEK["Key Encryption Key"]
+    RNG["Secure RNG"] --> DEK["Random Data Encryption Key"]
+    KEK --> Wrap["AES-256-GCM Wrap DEK"]
+    DEK --> Encrypt["AES-256-GCM Encrypt Vault Payload"]
+    Payload["Accounts / Groups / Settings"] --> Encrypt
+    Wrap --> File["Vault Envelope"]
+    Encrypt --> File
+```
+
+- DEK：随机 256 位数据密钥。
+- KEK：由主密码通过 Argon2id 派生。
+- KEK 只用于包装 DEK。
+- DEK 用于加密 Vault Payload。
+- 修改主密码时只需要重新包装 DEK，不需要用新密码重新加密全部账号。
+- AES-GCM 同时提供机密性和完整性校验。
+
+### 13.3 KDF 参数
+
+初始建议：
+
+- Argon2id。
+- 输出 32 字节。
+- 当前实现内存约 19 MiB（19456 KiB）。
+- 当前实现迭代 2 次。
+- 并行度 1。
+- 随机 salt 至少 16 字节。
+
+当前参数在开发机单次基准中创建约 110 ms、解锁约 64 ms。该结果不代表所有目标设备；仍需在首发最低配置设备上复测，并只对新 Vault 调整参数。KDF 参数与 Vault 一同保存，既有 Vault 必须保持兼容。
+
+### 13.4 Vault 文件格式
+
+建议扩展名：`.gcvault`
+
+```json
+{
+  "format": "google-code-vault",
+  "formatVersion": 1,
+  "kdf": {
+    "name": "argon2id",
+    "salt": "base64",
+    "memoryKiB": 19456,
+    "iterations": 2,
+    "parallelism": 1
+  },
+  "wrappedDek": {
+    "algorithm": "aes-256-gcm",
+    "nonce": "base64",
+    "ciphertext": "base64",
+    "mac": "base64"
+  },
+  "payload": {
+    "algorithm": "aes-256-gcm",
+    "nonce": "base64",
+    "ciphertext": "base64",
+    "mac": "base64"
+  }
+}
+```
+
+不敏感的格式和 KDF 元数据可以明文存在；账号、分组、偏好及所有 Secret 都在 payload 内。
+
+### 13.5 Nonce 和随机数
+
+- 使用操作系统安全随机源。
+- 每次包装和每次 Vault 保存都生成新的随机 nonce。
+- AES-GCM 同一密钥下不得复用 nonce。
+- 不使用时间戳、计数器或账号 ID 直接作为 nonce。
+
+### 13.6 原子写入
+
+保存流程：
+
+1. 在内存构造并加密新 Vault。
+2. 写入同目录临时文件 `vault.tmp`。
+3. flush 并尽可能执行 fsync。
+4. 将当前文件轮换为 `vault.bak`。
+5. 原子 rename 临时文件为正式文件。
+6. 成功后清理过期备份。
+
+启动时：
+
+- 正式文件有效则使用正式文件。
+- 正式文件损坏但 `.bak` 有效时，提示用户恢复。
+- 两者都损坏时不得创建空 Vault 覆盖原文件。
+
+### 13.7 文件位置
+
+使用 `path_provider` 获取应用支持目录：
+
+- macOS：用户 Library/Application Support 下的应用目录。
+- Windows：用户 AppData 下的应用目录。
+
+不要将 Vault 默认放在桌面、下载目录或会被普通文本工具索引的位置。
+
+## 14. 主密码、设备认证和会话锁
+
+### 14.1 主密码
+
+- 首次启动强制设置。
+- 不保存主密码和可直接比较的明文摘要。
+- 解锁时用密码派生 KEK，尝试解包 DEK；AES-GCM 校验成功即证明密码正确。
+- 密码修改需要先验证旧密码。
+- 忘记密码只能清空本地 Vault 或从已知密码的加密备份恢复。
+
+### 14.2 系统安全存储
+
+阶段 9 已通过自有 `google_code/secure_key_store` MethodChannel 实现设备安全存储，不引入 `flutter_secure_storage`：
+
+- macOS 使用 Security.framework Keychain，service 为 `com.gengyujian.google-code.quick-unlock`，account 为 `vault-dek-v1`，可访问级别为 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`。
+- Windows 使用 Credential Manager 的 `CredWriteW`、`CredReadW` 和 `CredDeleteW`，target 为 `com.gengyujian.google-code.quick-unlock.v1`，类型为 `CRED_TYPE_GENERIC`，持久化范围为 `CRED_PERSIST_LOCAL_MACHINE`。
+- 系统安全存储只保存当前 Vault 的 32 字节 DEK 副本，不保存主密码，也不修改现有 Vault envelope。
+- 主 Vault 始终保留主密码包装后的 DEK，主密码仍是恢复根凭据；`.gcbak` 不包含设备快速解锁材料。
+- 读取时严格校验 32 字节长度。缺失材料安全回退主密码；损坏或过期材料会删除后回退；用户取消设备认证不会删除有效材料。
+- Dart 和原生层在可控生命周期结束时尝试覆盖临时密钥字节，但不对垃圾回收语言的物理清零作绝对承诺。
+
+### 14.3 设备认证与快速解锁
+
+阶段 9 使用 `local_auth` 3.0.2 进行 Touch ID、Windows Hello 或设备凭据认证；锁定版本同时解析为 `local_auth_darwin` 2.0.3 和 `local_auth_windows` 2.0.1。
+
+已实现流程：
+
+1. 用户先用主密码解锁 Vault。
+2. 用户在“安全设置”主动开启快速解锁，并重新输入主密码。
+3. 主密码验证成功后调用设备认证；取消或失败时不导出、不保存 DEK。
+4. 认证成功后从已解锁 repository 导出 DEK 副本并写入系统安全存储。
+5. 下次启动时完成设备认证，读取 DEK，并使用现有 AES-GCM payload ciphertext 与 AAD 认证解密 Vault。
+6. 用户可随时禁用快速解锁，只删除设备安全存储材料，不锁定或重写主 Vault。
+7. 分享 Secret、URI 或二维码前，如果快速解锁已配置，可用设备认证重新验证；主密码重新认证始终保留为安全回退。
+
+Windows Hello 可能通过 PIN 等设备凭据完成认证，UI 统一使用“Windows Hello”，不宣称一定是指纹。macOS 使用“Touch ID 或设备密码”。
+
+### 14.4 自动锁定
+
+阶段 10 在保留原有手动锁定、交互超时和后台超时的基础上，增加系统级会话安全事件。默认超时为 5 分钟，可通过 Vault preferences 的 `autoLockMinutes` 在 1 至 60 分钟内配置；普通窗口短暂失焦只开始计时，不会立即锁定。
+
+统一原生边界为 MethodChannel `google_code/system_session_events`，原生仅调用 `systemSessionEvent`，参数规范化为：
+
+- `screenLocked`：系统屏幕已经锁定。
+- `sessionDisconnected`：当前用户会话失去活动状态、断开或注销。
+- `systemSleeping`：系统或显示器即将/已经睡眠。
+
+macOS runner 持有应用生命周期内唯一的 `SystemSessionEventEmitter`：
+
+- `DistributedNotificationCenter` 监听 `com.apple.screenIsLocked`。
+- `NSWorkspace.shared.notificationCenter` 监听 `willSleepNotification`、`screensDidSleepNotification` 和 `sessionDidResignActiveNotification`。
+- 所有 MethodChannel 调用统一回到主线程；observer 在 emitter 销毁时注销。
+
+Windows runner 在窗口创建时调用 `WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION)`，并在销毁时配对 `WTSUnRegisterSessionNotification`：
+
+- `WM_WTSSESSION_CHANGE` 的 `WTS_SESSION_LOCK` 映射为 `screenLocked`。
+- `WTS_CONSOLE_DISCONNECT`、`WTS_REMOTE_DISCONNECT`、`WTS_SESSION_LOGOFF` 和 `WTS_SESSION_TERMINATE` 映射为 `sessionDisconnected`。
+- `WM_POWERBROADCAST / PBT_APMSUSPEND` 映射为 `systemSleeping`。
+- runner 链接 `wtsapi32.lib`，安全消息在 Flutter/plugin 窗口消息处理之前检查。
+
+Dart 侧由 `MethodChannelSystemSessionEventService`、`SystemAutoLockCoordinator` 和 `RootRouteObserver` 协作：
+
+1. 先订阅同步广播事件流，再注册 MethodChannel handler，缩小启动时的事件丢失窗口。
+2. Vault 已锁定时忽略重复事件；已解锁时先无动画移除根 Navigator 首页以上的全部路由。
+3. 随后调用 `VaultSessionController.lock()`；repository 清理持有的 DEK 和解密 payload，session state 切换到锁定。
+4. 锁定帧不使用 `AnimatedSwitcher` 保留旧账号页，避免验证码缓存或敏感 widget 在退出动画期间继续存在。
+5. 不处理解锁、重新连接或唤醒事件；恢复后必须重新完成主密码或设备认证。
+6. 原生 handler 注册失败不会阻塞 Vault 启动，应用仍保留手动锁定、交互超时和 Flutter 生命周期超时降级路径。
+
+Dart 使用垃圾回收，不能保证明文字节被立即物理覆写。技术目标是通过关闭路由、销毁敏感 widget、清空 session/repository 引用和缩短生命周期降低暴露面，而不是承诺对进程内存进行绝对清零。
+
+## 15. 单个账号分享
+
+阶段 7 已实现本节首版跨平台闭环，阶段 9 已增加设备认证重新验证；系统分享面板仍属于后续增强。
+
+### 15.1 已实现分享材料
+
+`AccountShareService` 在主密码或已配置的设备认证重新验证成功后按需生成：
+
+- 原始 Base32 Secret。
+- 标准 `otpauth://totp` URI。
+- 与 URI 内容一致的 PNG 二维码。
+
+URI 复用 `OtpAuthUriCodec`，完整携带 issuer、账号名称、算法、位数和周期；二维码复用 `QrCodeService`。这些材料不在账号保存时预生成，不写入 Vault、日志、应用缓存或临时文件。
+
+### 15.2 当前分享流程
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as Share Dialog
+    participant C as VaultSessionController
+    participant R as VaultRepository
+    participant S as AccountShareService
+    participant OS as Clipboard or File Picker
+
+    U->>UI: 点击分享账号
+    UI->>U: 显示长期凭据风险警告
+    alt 已配置快速解锁
+        U->>UI: 选择设备认证
+        UI->>UI: local_auth 重新验证设备所有者
+    else 主密码回退
+        U->>UI: 输入主密码
+        UI->>C: reauthenticate(password)
+        C->>R: verifyPassword(password)
+        R-->>C: 重新读取并验证 Vault envelope
+        C-->>UI: 验证结果
+    end
+    UI->>S: create(account)
+    S-->>UI: Secret / URI / QR PNG
+    U->>UI: 显示、复制或保存
+    UI->>OS: 30 秒敏感复制或用户选择路径保存
+    UI->>UI: 操作后、60 秒、失焦或锁定时隐藏
+```
+
+`verifyPassword` 不替换仓储当前持有的已打开 Vault，也不把主密码、临时解密 payload 或认证结果保存到会话状态。设备重新认证只确认当前设备所有者，不读取快速解锁 DEK。
+
+### 15.3 已实现安全控制
+
+- 当前应用已解锁不等于允许直接分享；每次进入分享材料都必须完成设备认证或重新输入主密码。
+- 重新认证前只展示风险警告和账号标识，不生成或展示 Secret、URI、二维码。
+- Secret 和 URI 默认遮挡，需要用户主动点击显示。
+- 分享材料默认保留 60 秒，超时后释放并返回重新认证。
+- 窗口失焦、应用后台或 detached 时立即释放分享材料。
+- Vault 锁定时返回空内容并无动画移除分享路由，避免锁屏过渡期间继续显示凭据。
+- Secret 和 URI 使用 30 秒敏感剪贴板 TTL；清理前比较当前内容，避免覆盖用户后续复制的数据。
+- `SensitiveClipboardService` 由应用级 Riverpod Provider 持有，账号页面锁定销毁不会取消待执行的清理计时器。
+- 保存二维码必须由用户通过系统对话框选择路径，应用不创建临时文件或隐藏副本。
+- 复制或保存成功后立即隐藏当前分享材料。
+- TOTP Secret 一旦分享无法由本应用撤销；必须在对应服务重新绑定二次验证。
+
+### 15.4 尚未实现的平台分享
+
+首版不强制系统分享面板，当前始终提供复制 Secret、复制 URI 和保存二维码 PNG。后续可定义统一 `SystemShareService`：
+
+- macOS：封装 NSSharingServicePicker 或等价能力。
+- Windows：评估 DataTransferManager 桌面支持；不可靠时继续使用复制和保存降级路径。
+- 调用系统分享后无法控制目标应用如何处理 Secret，启用前必须继续保留明确风险确认。
+
+## 16. 加密备份与恢复
+
+阶段 8 已实现本节首版闭环，文件扩展名固定为 `Google Code Backup (.gcbak)`。
+
+### 16.1 独立备份 envelope
+
+备份不复制设备 `vault.gcvault`，而是将当前解锁后的逻辑 `VaultPayload` 使用全新的密钥材料重新加密。版本 1 envelope 包含：
+
+```text
+format = google-code-backup
+formatVersion = 1
+createdAt
+kdf = Argon2id(memoryKiB, iterations, parallelism, hashLength)
+salt
+wrappedDek = AES-256-GCM(nonce, ciphertext, mac)
+payload = AES-256-GCM(nonce, ciphertext, mac)
+```
+
+实现原则：
+
+- 用户设置独立备份密码，可与主密码不同，执行与主密码一致的最低长度校验。
+- 每次导出生成新的 salt、DEK、包装 nonce 和 payload nonce。
+- 包装 DEK 和 payload 分别使用 `google-code-backup:dek:v1` 与 `google-code-backup:payload:v1` 作为 AAD，禁止与设备 Vault envelope 混用。
+- 备份包含账号和完整 TOTP 参数、分组、排序、置顶、账号相关偏好、payload schema 版本和时间戳。
+- 备份不包含主密码、备份密码、设备 Vault DEK、Keychain/Credential Store 快速解锁材料或明文 JSON 副本。
+- 系统保存对话框直接写入用户选择的位置，不创建明文临时文件，也不提供 CSV/JSON 明文导出。
+
+### 16.2 不可信文件校验
+
+恢复入口在解密前完成以下限制：
+
+- 单文件最大 32 MiB，超限时不读取完整内容。
+- 校验固定 format、formatVersion、Argon2id 名称和有界 KDF 参数。
+- 校验 salt、AES-GCM nonce、MAC 和 ciphertext 基本长度。
+- 未来 formatVersion、非备份文件、损坏文件和错误密码映射为稳定且不泄露底层细节的错误文案。
+- 认证解密成功后再调用 `VaultPayload.fromJson` 校验 payload schema；首版只接受当前 schemaVersion，未来版本在此处接入 migration。
+
+### 16.3 恢复预览与冲突策略
+
+1. 用户选择 `.gcbak` 并输入备份密码。
+2. 应用在内存中认证解密为临时 `BackupRestorePreview`。
+3. 预览只展示账号数、分组数、可新增数、完全重复数、同名冲突数和备份时间，不展示 Secret 或完整账号内容。
+4. 完全重复项按规范化后的 `issuer + accountName + Secret` 判定。
+5. 同 issuer/accountName 但 Secret 不同的项计为冲突；合并模式首版保留为新的独立账号。
+6. 合并模式跳过完全重复项，当前设备偏好优先，导入账号追加排序，并处理账号 ID 和分组 ID 冲突。
+7. 替换模式完整采用备份账号、分组和偏好，执行前必须二次确认并建议先导出当前 Vault。
+
+### 16.4 原子提交与敏感生命周期
+
+- 解密、预览和冲突计算不直接操作 Vault 文件。
+- 用户最终确认后，由 `BackupService` 生成单个候选 `VaultPayload`，再通过 `VaultSessionController.applyRestoredPayload` 调用当前 `VaultRepository.save` 一次提交。
+- `VaultFileStore` 写入新 envelope 前保留现有 `.bak`，恢复内容使用当前设备已解锁 Vault 的 DEK 和新 nonce 重新加密。
+- repository 保存成功前不替换可见会话 payload；任何失败均保持当前 Vault 不变。
+- 备份密码在一次加解密后立即清空；恢复预览在关闭、应用失焦/后台或 Vault 锁定时释放，锁定时无动画移除恢复路由。
+- Dart GC 无法保证字符串物理清零，因此通过短生命周期、无日志、无缓存和不创建明文临时文件降低暴露面。
+
+### 16.5 模块边界
+
+```text
+lib/data/backup/backup_envelope.dart
+lib/data/backup/backup_crypto_service.dart
+lib/application/backup/backup_service.dart
+lib/domain/backup/backup.dart
+lib/platform/files/backup_file_service.dart
+lib/features/backup/backup_export_dialog.dart
+lib/features/backup/backup_restore_dialog.dart
+```
+
+## 17. 状态管理
+
+推荐 `flutter_riverpod`，按作用域区分状态：
+
+### 17.1 全局状态
+
+- `vaultSessionProvider`：locked、unlocking、unlocked、error。
+- `settingsProvider`：主题、语言和锁定策略。
+- `clockProvider`：共享时间步和倒计时。
+- `platformCapabilitiesProvider`：截图、摄像头、设备认证和分享能力。
+
+### 17.2 已解锁状态
+
+- `accountsProvider`。
+- `groupsProvider`。
+- `searchQueryProvider`。
+- `visibleAccountsProvider`：搜索、分组、置顶和排序后的派生状态。
+
+### 17.3 临时敏感状态
+
+- `importDraftProvider`。
+- `migrationBatchProvider`。
+- `shareMaterialProvider`。
+
+以上状态必须在锁定、页面关闭或超时后失效，不使用全局永久缓存。
+
+## 18. UI 与性能策略
+
+### 18.1 验证码列表
+
+- 使用虚拟化列表，只构建可见行。
+- 1000 个账号下不为每一行创建 Timer。
+- 当前验证码按时间步缓存。
+- 搜索字符串预先做小写和空白归一化。
+- `lastUsedAt` 更新合并写入，避免每次复制立即重写 Vault 多次。
+
+### 18.2 防止敏感内容残留
+
+- 锁定页替换整个导航栈，而不是只覆盖半透明遮罩。
+- 导入和分享对话框关闭时 dispose 临时状态。
+- 截图临时文件在 `finally` 中清除。
+- 日志和错误上报对象在进入 Logger 前进行统一脱敏。
+
+### 18.3 可访问性
+
+- 验证码可被键盘聚焦和复制。
+- 不只依赖颜色表达倒计时。
+- 支持系统文本缩放的合理范围。
+- 设备认证、截图和摄像头权限错误提供文字说明。
+
+## 19. 错误模型
+
+定义稳定的领域错误类型：
+
+```text
+VaultError
+├── vaultNotFound
+├── invalidPassword
+├── corruptedVault
+├── unsupportedVaultVersion
+├── storageUnavailable
+└── atomicWriteFailed
+
+ImportError
+├── unsupportedImage
+├── imageTooLarge
+├── qrNotFound
+├── unsupportedQrPayload
+├── invalidOtpAuthUri
+├── invalidSecret
+├── incompleteMigrationBatch
+└── unsupportedOtpType
+
+PlatformError
+├── permissionDenied
+├── capabilityUnavailable
+├── userCancelled
+├── temporaryFileFailure
+└── operationFailed
+```
+
+- 用户取消不作为错误弹窗。
+- UI 展示可操作的错误文案。
+- 底层异常可记录错误类别和堆栈，但必须先脱敏。
+
+## 20. 日志与隐私
+
+### 20.1 禁止记录
+
+- Secret。
+- `otpauth://` 完整 URI。
+- 当前或历史验证码。
+- 主密码、PIN、备份密码。
+- 完整二维码 payload。
+- 解密后的 Account JSON。
+- 未脱敏的文件路径和用户名。
+
+### 20.2 可记录
+
+- 功能入口和结果类别，例如 `qr_decode_failed`。
+- 不含内容的账号数量。
+- Vault schema 版本。
+- 平台能力状态和权限错误码。
+- 性能耗时，不包含输入数据。
+
+P0 默认只写本地滚动日志，不接入在线分析或崩溃上报。日志文件大小和保留天数必须受限。
+
+## 21. 依赖建议
+
+依赖版本在项目初始化和技术验证后锁定，安全相关依赖禁止使用宽泛版本范围。
+
+| 能力 | 建议依赖 | 说明 |
+| --- | --- | --- |
+| 加密 | `cryptography` | Argon2id、AES-GCM、HMAC、安全随机能力 |
+| 原生加密加速 | `cryptography_flutter` | 可选，使用平台实现提升性能 |
+| 设备认证 | `local_auth` 3.0.2 | Flutter 官方插件；macOS 使用 Touch ID/设备密码，Windows 使用 Windows Hello |
+| 系统安全存储 | 自有 MethodChannel | macOS Security.framework Keychain；Windows Credential Manager，避免依赖语义不明确的社区 Windows 安全存储实现 |
+| 文件选择 | `file_selector` | Flutter 官方插件 |
+| 应用目录 | `path_provider` | Flutter 官方插件 |
+| 区域截图 | 自有 Platform Channel | macOS 系统区域选择器；Windows GDI 自有选择器，通过 `ScreenCaptureService` 隔离 |
+| 剪贴板图片 | 自有 Platform Channel | macOS `NSPasteboard`、Windows DIB，通过接口隔离 |
+| 图片处理 | `image` | 图片解码、旋转、缩放和预处理 |
+| QR 解码 | `zxing2` | 纯 Dart ZXing 移植，需用 fixtures 验证 |
+| QR 生成 | `qr` | 生成 QR 矩阵，再由 UI/图片层渲染 |
+| Google 迁移解析 | 自有 bounded Protobuf wire reader | 不引入生成模型，使用固定 fixtures 与真实导出样本回归 |
+| 状态管理 | `flutter_riverpod` | 会话和功能状态管理 |
+| UUID | `uuid` | 本地随机 ID |
+| 国际化 | Flutter `gen_l10n` | 中英文资源生成 |
+
+所有社区插件必须满足：
+
+- 许可证可接受。
+- 最近版本能够在目标 Flutter SDK 编译。
+- 不包含不必要的网络访问。
+- macOS 和 Windows 均完成真机验证。
+- 关键插件被封装在自有接口之后。
+
+## 22. 平台权限
+
+### 22.1 macOS
+
+可能需要：
+
+- Screen Recording：区域截图。
+- Camera：摄像头扫描。
+- Touch ID/Local Authentication：快速解锁和重新认证。
+- Keychain：快速解锁材料。
+- 文件读写权限：用户选择图片、导入和保存备份/二维码。
+
+应用沙盒、entitlements、签名和公证必须在开发早期验证，不能到发布阶段才处理。
+
+### 22.2 Windows
+
+可能需要：
+
+- Camera privacy capability。
+- Windows Hello/设备凭据。
+- 用户 AppData 写入。
+- 用户选择的备份和二维码路径写入。
+- 系统锁屏事件监听。
+
+P0 不申请网络能力，不启动本地 HTTP 服务。
+
+## 23. 测试方案
+
+### 23.1 单元测试
+
+#### TOTP
+
+- RFC 6238 SHA-1、SHA-256、SHA-512 官方测试向量。
+- 6 位、8 位和不同周期。
+- 时间步边界前后。
+- 大端 counter 编码。
+- 非法 digits、period 和 Secret。
+
+#### URI
+
+- 百分号编码和 Unicode label。
+- issuer 位于 label、query 或两者。
+- issuer 冲突。
+- 缺少 Secret。
+- HOTP 和未知算法。
+- 大小写 Base32、空格和 padding。
+
+#### Vault
+
+- 正确密码解锁。
+- 错误密码失败。
+- ciphertext、nonce、mac 任意一处被篡改时失败。
+- 主密码修改后旧密码失效、新密码有效。
+- schema migration。
+- 正式文件损坏时 `.bak` 恢复。
+- 原子写入中断模拟。
+
+#### 快速解锁
+
+- 启用前必须验证主密码和设备认证。
+- 设备认证取消时不写入或删除有效快速解锁材料。
+- 正确 DEK 可认证解密当前 Vault，错误或损坏 DEK 会删除并回退主密码。
+- 禁用只删除设备材料，不改变 Vault envelope。
+- 分享前设备重新认证不读取 DEK，且始终保留主密码回退。
+
+#### 分享
+
+- 生成 URI 与原账号参数一致。
+- 分享 QR 可被自身解码器重新导入。
+- 未重新认证不能获得分享材料。
+- 超时、失焦和锁定后分享材料失效。
+- 敏感剪贴板只清理自己写入且仍未变化的内容。
+
+### 23.2 Fixtures
+
+需要建立固定测试资源：
+
+- 正常、模糊、旋转、反色和高分辨率二维码图片。
+- 包含多个二维码的图片。
+- 标准 `otpauth://` 二维码。
+- Google Authenticator 单张和多张迁移二维码。
+- 损坏、截断和不完整迁移 payload。
+- 不同算法和位数的账号。
+
+测试 fixtures 只能使用专用虚假 Secret，不得使用真实账号数据。
+
+### 23.3 集成测试
+
+- 首次设置主密码、退出、重新解锁。
+- 图片导入到首页生成验证码。
+- 剪贴板图片和文本 URI 导入。
+- 截图取消、权限拒绝和成功路径。
+- 搜索、编辑、分组、删除和重新启动持久化。
+- 加密备份、清空、恢复。
+- 单账号二维码分享后在新临时 Vault 导入。
+
+### 23.4 平台手工测试矩阵
+
+| 场景 | macOS arm64 | macOS x64 | Windows 10 x64 | Windows 11 x64 |
+| --- | --- | --- | --- | --- |
+| 安装和首次启动 | 必测 | 发布前 | 必测 | 必测 |
+| Keychain/Credential Store | 必测 | 发布前 | 必测 | 必测 |
+| 设备认证/设备凭据 | 必测 | 发布前 | 必测 | 必测 |
+| 区域截图权限 | 必测 | 发布前 | 必测 | 必测 |
+| 剪贴板图片 | 必测 | 发布前 | 必测 | 必测 |
+| 摄像头 | P1 | P1 | P1 | P1 |
+| 文件备份恢复 | 必测 | 发布前 | 必测 | 必测 |
+| 系统分享 | P1 | P1 | P1/降级 | P1/降级 |
+| 系统锁屏自动锁定 | 必测 | 发布前 | 必测 | 必测 |
+
+### 23.5 安全测试
+
+- 在 Vault、日志、临时文件和崩溃输出中搜索测试 Secret。
+- 验证关闭应用后临时截图和分享图片已删除。
+- 对 URI、二维码 payload 和备份文件进行 fuzz 测试。
+- 验证符号链接和异常目标路径不会覆盖非预期文件。
+- 验证超大图片、压缩炸弹和畸形 protobuf 不导致内存失控。
+- 依赖漏洞扫描和许可证检查。
+
+## 24. CI/CD
+
+建议使用 GitHub Actions 或等价 CI：
+
+### 24.1 每次提交
+
+- `dart format --output=none --set-exit-if-changed .`
+- `flutter analyze`
+- `flutter test`
+- Vault 和 TOTP 安全测试。
+- macOS、Windows debug build。
+
+### 24.2 发布构建
+
+- macOS release build、签名、公证。
+- Windows release build、代码签名和安装包。
+- 生成 SHA-256 校验值。
+- 依赖清单和许可证文件。
+- 不在构建日志中输出签名密钥或证书密码。
+
+### 24.3 更新机制
+
+P0 不实现自动更新。后续若增加：
+
+- 更新包必须签名验证。
+- 更新检查不得携带账号或设备敏感信息。
+- 离线使用不能被更新服务不可用阻塞。
+
+## 25. 开发阶段与任务拆分
+
+### 阶段 0：技术验证
+
+目标：在正式搭建业务前排除平台风险。
+
+- 创建最小 Flutter Desktop 工程。
+- 升级并固定 Flutter SDK。
+- 验证 macOS、Windows release build。
+- 验证 Argon2id 和 AES-GCM 性能。
+- 验证图片和剪贴板 QR 解码。
+- 验证区域截图及 macOS 权限流程。
+- 验证 Keychain、Windows 安全存储和 `local_auth`。
+- 输出 ADR，锁定依赖版本。
+
+退出标准：P0 平台能力都有可运行 PoC。
+
+### 阶段 1：P0 核心安全闭环
+
+- Vault 创建、解锁、加密和原子保存。
+- TOTP、Base32、URI 解析和测试向量。
+- 账号 CRUD。
+- 验证码列表、共享 ticker、复制和搜索。
+- 应用锁和生命周期处理。
+
+### 阶段 2：P0 多入口导入
+
+- 文件二维码。
+- 剪贴板图片和 URI。
+- 区域截图。
+- 统一导入确认、重复检测和错误报告。
+- 临时文件清理和安全测试。
+
+### 阶段 3：P1 完整管理
+
+- 分组、排序和置顶。
+- 设备认证快速解锁。
+- 加密备份与恢复。
+- Google Authenticator 迁移二维码。
+- 单账号 Secret、URI 和二维码分享。
+
+### 阶段 4：P1 摄像头与平台分享
+
+- macOS 摄像头插件。
+- Windows 摄像头插件。
+- 系统分享面板和降级策略。
+- 完整平台矩阵验证。
+
+### 阶段 5：P2 体验与发布
+
+- 深色模式和英文。
+- 托盘、全局快捷键和快速窗口。
+- 性能优化、可访问性。
+- 签名、公证、安装包和发布检查。
+
+## 26. 需求到技术实现映射
+
+| PRD 能力 | 技术模块 |
+| --- | --- |
+| TOTP 和倒计时 | `TotpService` + shared clock provider |
+| 手动 Secret | Base32 parser + account use case |
+| `otpauth://` | `OtpAuthUriCodec` |
+| 图片二维码 | `ImagePreprocessor` + `QrDecoder` |
+| 剪贴板粘贴 | `ClipboardService` |
+| 区域截图 | `ScreenCaptureService` |
+| 摄像头 | macOS/Windows camera adapters |
+| Google 批量迁移 | `GoogleAuthenticatorMigrationCodec` + `GoogleMigrationBatchAccumulator` + batch confirmation |
+| 搜索、分组和排序 | in-memory derived providers + encrypted Vault |
+| 本地加密 | Argon2id + AES-256-GCM envelope |
+| 主密码和设备认证 | Vault unlock + `local_auth` + Keychain/Credential Manager |
+| 加密备份 | independent encrypted backup envelope |
+| 单账号分享 | reauthentication + URI codec + QR generator |
+| 自动锁定 | app lifecycle + native OS session events |
+| 深色模式、多语言 | Flutter theme + `gen_l10n` |
+
+## 27. 主要风险与缓解措施
+
+| 风险 | 影响 | 缓解措施 |
+| --- | --- | --- |
+| Windows/macOS 摄像头插件成熟度不足 | P1 延期 | 摄像头独立阶段、优先自有薄插件、P0 不依赖摄像头 |
+| 截图插件停止维护 | P0 平台能力风险 | 通过接口隔离，保留自有 Platform Channel 替换路径 |
+| 原生安全存储平台差异 | 快速解锁风险 | 主密码 Vault 独立存在、自有薄适配层、固定 32 字节校验、目标平台真机测试 |
+| Dart GC 无法保证内存清零 | 内存取证风险 | 缩短明文生命周期、锁定清状态、明确威胁模型 |
+| Google 迁移格式变化 | 批量导入失效 | 独立适配器、fixtures、错误隔离、不影响标准 URI |
+| Secret 分享误操作 | 账号长期泄露 | 强警告、每次重新认证、超时隐藏、不缓存二维码 |
+| Vault 写入中断 | 数据损坏 | 临时文件、fsync、原子替换和 `.bak` 恢复 |
+| 系统时间错误 | 验证码无效 | 时间跳变检测、明确提示、无需联网校时 |
+| 依赖供应链风险 | 安全和稳定性 | 减少依赖、锁版本、审查关键插件、依赖扫描 |
+
+## 28. 威胁模型边界
+
+本方案重点防护：
+
+- 设备磁盘文件被离线复制。
+- 普通日志、缓存、临时文件泄露。
+- 未授权用户直接打开应用查看验证码。
+- 误复制、误分享或分享页面长时间暴露。
+- Vault 和备份文件被篡改。
+
+本方案不能完全防护：
+
+- 已控制用户系统权限的恶意软件。
+- 键盘记录、屏幕录制和剪贴板监控软件。
+- 调试器读取已解锁进程内存。
+- 操作系统、固件或硬件被攻破。
+- 用户主动将 Secret 或二维码交给不可信接收者。
+
+产品文案不得宣称可以抵御已完全控制本机的攻击者。
+
+## 29. 实施前必须确认的决策
+
+1. 首发是否确定同时支持 macOS 和 Windows。
+2. 单账号分享是否从 P1 提升为 P0。
+3. Windows 系统分享面板是硬性要求，还是允许复制/保存降级。
+4. 主密码最低规则和自动锁定默认时长。
+5. 是否接受 Windows Hello PIN 作为“生物识别/设备认证”的一种结果。
+6. 是否兼容 8 位、非 30 秒周期和 SHA-256/SHA-512；当前技术方案建议兼容。
+7. 是否允许用户选择“关闭启动时锁定”；安全上建议不允许完全关闭。
+8. 是否需要 Linux；当前方案不纳入首版。
+
+## 30. 参考资料
+
+以下资料在 2026-07-16 技术方案编写时用于确认能力范围：
+
+- [Flutter Desktop support](https://docs.flutter.dev/platform-integration/desktop)
+- [Flutter local_auth](https://pub.dev/packages/local_auth)
+- [Flutter file_selector](https://pub.dev/packages/file_selector)
+- [Flutter path_provider](https://pub.dev/packages/path_provider)
+- [Dart cryptography](https://pub.dev/packages/cryptography)
+- Apple Security.framework Keychain Services
+- Microsoft Credential Management API
+- [zxing2](https://pub.dev/packages/zxing2)
+- [qr](https://pub.dev/packages/qr)
+- [RFC 6238: TOTP](https://www.rfc-editor.org/rfc/rfc6238)
+
+## 31. 技术评审清单
+
+- [x] Flutter 3.44.0 和 Dart 3.12.0 已通过 FVM 固定。
+- [ ] macOS、Windows 最低版本已确认。
+- [ ] Vault envelope 和 KDF 参数已评审。
+- [x] 主密码与快速解锁流程已实现并完成 Dart/macOS 验证；Windows 真机验收待完成。
+- [x] P0 图片 QR、剪贴板和区域截图 PoC 已完成；Windows 原生实现仍待目标平台验证。
+- [x] Google 迁移固定 fixtures、真实迁移 QR PNG 和批量界面闭环测试已准备。
+- [x] 单账号安全分享已确认为迁移导入后的下一开发阶段。
+- [ ] 摄像头平台方案已完成 P1 PoC。
+- [ ] 日志脱敏和临时文件策略已评审。
+- [ ] CI、签名和发布方式已确认。
+- [x] 工程初始化和阶段 0 核心技术验证已完成，剩余平台验收项继续跟踪。
