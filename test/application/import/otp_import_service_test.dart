@@ -24,6 +24,34 @@ void main() {
     expect(candidate.draft.periodSeconds, 45);
   });
 
+  test('decodes camera frames with a camera-specific source', () async {
+    final png = QrCodeService().encodePng(uri);
+
+    final result = await const OtpImportService().tryDecodeCameraFrame(png);
+
+    expect(result, isA<SingleOtpImportResult>());
+    final candidate = (result! as SingleOtpImportResult).candidate;
+    expect(candidate.source, OtpImportSource.camera);
+    expect(candidate.draft.accountName, 'alice@example.com');
+  });
+
+  test('keeps scanning when a camera frame has no QR code', () async {
+    final result = await const OtpImportService().tryDecodeCameraFrame(
+      Uint8List.fromList([1, 2, 3, 4]),
+    );
+
+    expect(result, isNull);
+  });
+
+  test('rejects a visible camera QR that is not an OTP payload', () async {
+    final png = QrCodeService().encodePng('https://example.com/not-an-otp');
+
+    expect(
+      const OtpImportService().tryDecodeCameraFrame(png),
+      throwsA(isA<OtpImportException>()),
+    );
+  });
+
   test('rejects images above the configured byte limit', () async {
     const service = OtpImportService(maxImageBytes: 4);
 

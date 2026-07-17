@@ -73,6 +73,23 @@ class OtpImportService {
     return decodeQrText(payload, source: source);
   }
 
+  /// Decodes a transient camera frame, returning null while no QR is visible.
+  Future<OtpImportResult?> tryDecodeCameraFrame(Uint8List bytes) async {
+    if (bytes.isEmpty || bytes.length > maxImageBytes) return null;
+
+    late final String payload;
+    try {
+      payload = await Isolate.run(
+        () => QrCodeService().decodeImage(bytes, maxPixels: maxImagePixels),
+      );
+    } on Object {
+      // A transient or partially written frame is equivalent to no visible QR.
+      return null;
+    }
+
+    return decodeQrText(payload, source: OtpImportSource.camera);
+  }
+
   /// Backward-compatible single-account API used by existing call sites/tests.
   Future<OtpImportCandidate> fromImageBytes(
     Uint8List bytes, {

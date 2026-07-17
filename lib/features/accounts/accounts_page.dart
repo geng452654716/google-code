@@ -13,6 +13,7 @@ import '../../domain/totp/totp.dart';
 import '../../platform/clipboard/clipboard_import_reader.dart';
 import '../../platform/screenshot/screen_capture_service.dart';
 import 'account_editor_dialog.dart';
+import 'camera_qr_scanner_dialog.dart';
 import 'account_share_dialog.dart';
 import 'google_migration_import_dialog.dart';
 import '../backup/backup_center_dialog.dart';
@@ -110,6 +111,7 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
                         received: batch.receivedPartCount,
                         total: batch.batchSize,
                         isImporting: _isImporting,
+                        onContinueCamera: _importFromCamera,
                         onContinueImage: _importFromImage,
                         onContinueScreenshot: _importFromScreenshot,
                         onCancel: () => setState(() => _migrationBatch = null),
@@ -235,6 +237,15 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
           ),
           SimpleDialogOption(
             onPressed: () =>
+                Navigator.of(context).pop(_AddAccountAction.camera),
+            child: const ListTile(
+              leading: Icon(Icons.qr_code_scanner_rounded),
+              title: Text('摄像头扫描'),
+              subtitle: Text('使用本机摄像头扫描普通二维码或迁移二维码'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () =>
                 Navigator.of(context).pop(_AddAccountAction.qrImage),
             child: const ListTile(
               leading: Icon(Icons.image_search_rounded),
@@ -267,12 +278,33 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
     switch (action) {
       case _AddAccountAction.manualOrUri:
         await _showAddDialog();
+      case _AddAccountAction.camera:
+        await _importFromCamera();
       case _AddAccountAction.qrImage:
         await _importFromImage();
       case _AddAccountAction.screenshot:
         await _importFromScreenshot();
       case _AddAccountAction.clipboard:
         await _importFromClipboard();
+    }
+  }
+
+  /// Opens the desktop camera scanner and reuses the shared confirmation flow.
+  Future<void> _importFromCamera() async {
+    if (_isImporting || ref.read(vaultSessionProvider).isProcessing) return;
+    setState(() => _isImporting = true);
+    try {
+      final result = await showDialog<OtpImportResult>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const CameraQrScannerDialog(),
+      );
+      if (result == null || !mounted) return;
+      await _handleImportResult(result, successMessage: '摄像头二维码账号已加密保存');
+    } on Object {
+      if (mounted) _showMessage('摄像头扫描失败，请重新打开扫描窗口。');
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
     }
   }
 
@@ -582,6 +614,7 @@ class _MigrationProgressBanner extends StatelessWidget {
     required this.received,
     required this.total,
     required this.isImporting,
+    required this.onContinueCamera,
     required this.onContinueImage,
     required this.onContinueScreenshot,
     required this.onCancel,
@@ -590,6 +623,7 @@ class _MigrationProgressBanner extends StatelessWidget {
   final int received;
   final int total;
   final bool isImporting;
+  final VoidCallback onContinueCamera;
   final VoidCallback onContinueImage;
   final VoidCallback onContinueScreenshot;
   final VoidCallback onCancel;
@@ -616,6 +650,10 @@ class _MigrationProgressBanner extends StatelessWidget {
               'Google Authenticator 迁移批次：已读取 $received/$total 张',
               style: TextStyle(color: colors.onSecondaryContainer),
             ),
+          ),
+          TextButton(
+            onPressed: isImporting ? null : onContinueCamera,
+            child: const Text('继续摄像头扫描'),
           ),
           TextButton(
             onPressed: isImporting ? null : onContinueImage,
@@ -944,4 +982,4 @@ class _AccountCard extends StatelessWidget {
 }
 
 /// User-selected account creation entry point.
-enum _AddAccountAction { manualOrUri, qrImage, screenshot, clipboard }
+enum _AddAccountAction { manualOrUri, camera, qrImage, screenshot, clipboard }
