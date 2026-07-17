@@ -134,3 +134,9 @@ Windows 分享代码的 `TypedEventHandler` 模板缺少完整的 Windows Founda
 - 阶段 13 已实现 macOS/Windows 摄像头二维码扫描 PoC，统一支持标准 `otpauth://` 和 Google Authenticator 迁移二维码导入。
 - `camera` + `camera_desktop` 已通过 Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建；实现提交对应 GitHub Actions 运行 `29564583502`。
 - 摄像头真实扫码尚未完成人工验收，Windows 10/11 真机平台能力矩阵仍需继续执行；详见 `docs/PHASE13_STATUS.md`。
+
+## 阶段 14 后续进展
+
+- 阶段 14 已新增独立的手动 Release Readiness 工作流；普通 push 仍保留阶段 12 的 Debug CI，不额外承担 Release 构建开销。
+- macOS/Windows Release 模式归档、独立 SHA-256、锁定依赖清单和第三方许可证报告已在运行 `29568998326` 通过，并完成下载后校验。
+- 当前 Release Artifact 仍没有可信发布签名：macOS 未使用 Apple Developer ID 且未公证，Windows 未使用 Authenticode 且没有安装包；详见 `docs/PHASE14_STATUS.md`。

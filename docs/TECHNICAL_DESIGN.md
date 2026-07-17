@@ -1150,7 +1150,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 ## 24. CI/CD
 
-阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。
+阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14 进一步新增 `.github/workflows/release-readiness.yml`，仅允许手动触发 Release 模式构建、依赖来源/许可证审计和校验值生成，避免增加每次普通提交的 CI 负担。
 
 ### 24.1 每次提交
 
@@ -1159,22 +1159,37 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 - `dart format --output=none --set-exit-if-changed lib test tool`
 - `flutter analyze`
 - `flutter test`
-- Vault、TOTP、导入、摄像头扫描、分享、备份、快速解锁和系统事件等 106 项自动化测试。
+- Vault、TOTP、导入、摄像头扫描、分享、备份、快速解锁、系统事件和发布元数据审计等 114 项自动化测试。
 
 质量检查通过后并行执行：
 
 - `macos-15`：`flutter build macos --debug`
 - `windows-2022`：`flutter build windows --debug`
 
-macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。阶段 13 摄像头实现提交对应运行 `29564583502`：Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建均已通过。CI 结果只代表代码和编译闭环，不代表真实摄像头设备已经验收。
+macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。阶段 13 摄像头实现提交对应运行 `29564583502`：Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建均已通过。阶段 14 最终实现提交对应运行 `29568997087`：Linux 114 项测试以及 macOS/Windows Debug 构建均已通过。CI 结果只代表代码和编译闭环，不代表真实摄像头设备已经验收。
 
 ### 24.2 发布构建
 
-- macOS release build、签名、公证。
-- Windows release build、代码签名和安装包。
-- 生成 SHA-256 校验值。
-- 依赖清单和许可证文件。
-- 不在构建日志中输出签名密钥或证书密码。
+阶段 14 已建立手动 Release Readiness 基线：
+
+- `tool/release_metadata.dart` 读取 `pubspec.lock`，hosted 依赖只允许 `https://pub.dev`，Flutter SDK 依赖使用明确 SDK source，Git、path 和未知来源直接失败。
+- `.dart_tool/package_config.json` 只用于定位本次解析后的包目录；本机 package cache 的镜像路径不会覆盖 lockfile 来源判定，也不会写入发布报告。
+- 生成 `dependency-manifest.json` 和 `THIRD_PARTY_NOTICES.txt`，记录精确版本、依赖关系、lockfile SHA-256、许可证内容 SHA-256 和去重后的许可证文本。
+- 在 `macos-15` 和 `windows-2022` 分别执行 Release 构建，归档应用目录、发布元数据和 `UNSIGNED_BUILD.txt`，并为归档生成独立 SHA-256 文件。
+- Artifact 名称明确包含 `unsigned`，保留 14 天，只用于发布准备和可信设备真机验收。
+- macOS 构建可能带 Xcode ad hoc 签名，但没有 Apple Developer ID 签名或公证；Windows 构建没有 Authenticode 签名。
+- SHA-256 只能验证内容完整性，不能认证发布者或替代可信代码签名。
+- 自动许可证清单是锁定依赖快照，不等同于法律意见；正式分发前仍需人工审查。
+
+正式发布仍需完成：
+
+- Apple Developer ID 签名、公证和 stapling。
+- Windows 代码签名、安装包、SmartScreen 和升级/卸载验证。
+- 签名密钥隔离、短期凭证、最小权限和日志脱敏，禁止在构建日志中输出证书或密码。
+- CycloneDX/SPDX SBOM、已知漏洞扫描、Dependabot/依赖审查和 Secret scanning。
+- 目标平台真机验收、版本 Tag、GitHub Release 和回滚策略。
+
+阶段 14 最终 Release Readiness 运行 `29568998326` 已通过依赖/许可证审计、macOS Release 和 Windows Release 三个 Job。下载最终 Artifact 后，macOS 与 Windows 的独立 SHA-256 均可由 macOS `shasum -c` 验证，且归档包含应用、manifest、notices 和 unsigned 声明。首轮运行曾发现 PowerShell CRLF 导致 Windows 校验文件跨平台不兼容，已在 `7ba1149` 改为无 BOM ASCII + LF 并重跑验证。
 
 ### 24.3 更新机制
 
@@ -1239,7 +1254,8 @@ P0 不实现自动更新。后续若增加：
 - 深色模式和英文。
 - 托盘、全局快捷键和快速窗口。
 - 性能优化、可访问性。
-- 签名、公证、安装包和发布检查。
+- [阶段 14 已实现基线] 锁定依赖来源/许可证审计、macOS/Windows Release 模式归档和 SHA-256。
+- [待正式发布] Apple Developer ID 签名/公证、Windows Authenticode/安装包、SBOM、漏洞扫描和目标真机发布检查。
 
 ## 26. 需求到技术实现映射
 
@@ -1273,7 +1289,7 @@ P0 不实现自动更新。后续若增加：
 | Secret 分享误操作 | 账号长期泄露 | 强警告、每次重新认证、超时隐藏、不缓存二维码 |
 | Vault 写入中断 | 数据损坏 | 临时文件、fsync、原子替换和 `.bak` 恢复 |
 | 系统时间错误 | 验证码无效 | 时间跳变检测、明确提示、无需联网校时 |
-| 依赖供应链风险 | 安全和稳定性 | 减少依赖、锁版本、审查关键插件、依赖扫描 |
+| 依赖供应链风险 | 安全和稳定性 | 减少依赖、锁版本；阶段 14 强制 pub.dev/Flutter SDK 来源白名单并生成许可证快照；后续补充 SBOM、漏洞扫描和关键插件人工审查 |
 
 ## 28. 威胁模型边界
 
@@ -1333,6 +1349,7 @@ P0 不实现自动更新。后续若增加：
 - [x] Google 迁移固定 fixtures、真实迁移 QR PNG 和批量界面闭环测试已准备。
 - [x] 单账号安全分享及 macOS/Windows 原生系统分享已实现，Windows 原生实现已通过 MSVC 编译；真机交互验收待完成。
 - [x] 阶段 13 摄像头平台方案已完成 P1 PoC，并通过 Linux 测试及 macOS/Windows Debug 编译；双平台真实摄像头人工验收待完成。
+- [x] 阶段 14 Release Readiness 已建立依赖来源/许可证审计、双平台 Release 模式归档和 SHA-256 基线；可信签名、公证、安装包、SBOM、漏洞扫描和正式发布仍待完成。
 - [ ] 日志脱敏和临时文件策略已评审。
-- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；签名、公证、安装包和正式发布方式仍待确认。
+- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；阶段 14 已补充 unsigned Release 构建，目标平台正式发布方式仍待确认。
 - [x] 工程初始化和阶段 0 核心技术验证已完成，剩余平台验收项继续跟踪。

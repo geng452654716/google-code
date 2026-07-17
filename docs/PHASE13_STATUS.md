@@ -220,3 +220,10 @@ sequenceDiagram
 3. 对 650ms 抓帧策略测量 CPU、内存、识别延迟和设备稳定性；必要时调整分辨率或间隔。
 4. 审查 `camera_desktop` 的维护状态、许可证和依赖链；若风险不可接受，设计自有 AVFoundation/Media Foundation 元数据扫描插件替换 `CameraQrCaptureService` 实现。
 5. 进入发布准备阶段：Release 构建、macOS 签名/公证、Windows 代码签名与安装包、依赖审计和产物校验值。
+
+## 阶段 14 后续进展
+
+- 阶段 14 已建立手动 Release Readiness 工作流，生成 macOS/Windows Release 模式归档、SHA-256、锁定依赖清单和去重后的第三方许可证报告。
+- `pubspec.lock` 当前 116 个依赖已通过来源审计：112 个 hosted 依赖全部锁定到 `https://pub.dev`，另有 4 个 Flutter SDK 包。
+- 阶段 14 Artifact 没有可信发布签名：macOS 只有 ad hoc 签名且未公证，Windows 没有 Authenticode 签名；只用于发布准备和真机验收。
+- 摄像头维护、性能和真机交互风险仍未因 Release 编译通过而关闭；详见 `docs/PHASE14_STATUS.md`。
