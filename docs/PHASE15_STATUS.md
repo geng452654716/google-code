@@ -78,7 +78,33 @@
 
 ## GitHub Actions 验证
 
-待实现提交推送并完成 Desktop CI 与 Personal Install Readiness 后回填真实运行编号。
+实现提交：`0dcca1c8432059838b78cce47893a9474b6e5216`
+
+### Desktop CI
+
+- 运行编号：`29572050531`
+- 结果：全部通过
+- 运行地址：`https://github.com/geng452654716/google-code/actions/runs/29572050531`
+
+| Job | Runner | 结果 | 用时 |
+| --- | --- | --- | --- |
+| Quality checks | `ubuntu-24.04` | 通过，118 tests | 2m3s |
+| macOS debug build | `macos-15` | 通过，产物已上传 | 1m58s |
+| Windows debug build | `windows-2022` | 通过，产物已上传 | 4m1s |
+
+### Personal Install Readiness
+
+- 运行编号：`29572098688`
+- 结果：全部通过
+- 运行地址：`https://github.com/geng452654716/google-code/actions/runs/29572098688`
+
+| Job | Runner | 结果 | 用时 |
+| --- | --- | --- | --- |
+| Dependency and license audit | `ubuntu-24.04` | 通过，元数据已上传 | 37s |
+| macOS personal build and install | `macos-15` | 通过，dry run / 安装 / 重复升级 / 卸载 / 归档 | 2m22s |
+| Windows personal build and install | `windows-2022` | 通过，dry run / 安装 / 重复升级 / 卸载 / 归档 | 7m43s |
+
+Windows Job 的 `Smoke test personal Windows install, upgrade, and uninstall` 步骤明确成功，证明 PowerShell 语法、Release 目录复制、transaction 升级和卸载逻辑已在真实 Windows Runner 执行，而不只是静态检查。
 
 ## 安全与隐私约束
 

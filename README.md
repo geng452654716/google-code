@@ -8,7 +8,7 @@
 
 本项目明确为**个人自用软件**，不计划公开发布、上架应用商店或创建公开 GitHub Release。阶段 15 提供无需管理员权限的用户级安装脚本：macOS 安装到 `~/Applications/Google Code.app`，Windows 安装到 `%LOCALAPPDATA%\Programs\Google Code` 并可创建当前用户的开始菜单快捷方式。重复执行脚本即完成可恢复升级；卸载默认只删除应用和脚本管理的快捷方式，不删除 Vault、系统安全存储记录或 `.gcbak` 备份。
 
-当前 macOS 构建只有 ad hoc 签名，Windows 构建没有 Authenticode 签名；安装脚本不会移除 `com.apple.quarantine`、绕过 Gatekeeper/SmartScreen，也不等同于可信发布签名。摄像头与其他 Windows 原生能力仍待目标真机人工验收。阶段详情见 `docs/PHASE15_STATUS.md`。
+当前验证为 `flutter analyze` 0 issues、`flutter test` 118 tests；Desktop CI `29572050531` 和双平台 Personal Install Readiness `29572098688` 全部通过。macOS 构建只有 ad hoc 签名，Windows 构建没有 Authenticode 签名；安装脚本不会移除 `com.apple.quarantine`、绕过 Gatekeeper/SmartScreen，也不等同于可信发布签名。摄像头与其他 Windows 原生能力仍待目标真机人工验收。阶段详情见 `docs/PHASE15_STATUS.md`。
 
 详细进度见：
 

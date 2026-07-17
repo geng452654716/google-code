@@ -1166,7 +1166,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 - `macos-15`：`flutter build macos --debug`
 - `windows-2022`：`flutter build windows --debug`
 
-macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。阶段 13 摄像头实现提交对应运行 `29564583502`：Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建均已通过。阶段 14 最终实现提交对应运行 `29568997087`：Linux 114 项测试以及 macOS/Windows Debug 构建均已通过。CI 结果只代表代码和编译闭环，不代表真实摄像头设备已经验收。
+macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。阶段 13 摄像头实现提交对应运行 `29564583502`：Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建均已通过。阶段 14 最终实现提交对应运行 `29568997087`：Linux 114 项测试以及 macOS/Windows Debug 构建均已通过。阶段 15 实现提交对应运行 `29572050531`：Linux 118 项测试、macOS Debug 和 Windows Debug 均通过；手动 Personal Install Readiness 运行 `29572098688` 进一步在 macOS/Windows Release Runner 完成 dry run、首次安装、重复升级和卸载。CI 结果只代表代码、构建和文件级安装闭环，不代表真实摄像头设备及全部原生交互已经验收。
 
 ### 24.2 个人 Release 构建与安装验收
 
@@ -1184,6 +1184,8 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 当前产品范围是个人自用，不把以下公开分发能力作为阶段退出条件：Apple Developer ID 签名/公证、Windows Authenticode、MSIX/MSI、应用商店、公开 GitHub Release 和自动更新服务。若未来改变分发范围，必须重新启动可信签名、商标、安装包、SBOM、漏洞扫描和目标平台发布评审，不能直接把当前个人安装产物视为公开发布产物。
 
 阶段 14 最终 Release Readiness 运行 `29568998326` 已通过依赖/许可证审计、macOS Release 和 Windows Release 三个 Job。下载最终 Artifact 后，macOS 与 Windows 的独立 SHA-256 均可由 macOS `shasum -c` 验证，且归档包含应用、manifest、notices 和 unsigned 声明。首轮运行曾发现 PowerShell CRLF 导致 Windows 校验文件跨平台不兼容，已在 `7ba1149` 改为无 BOM ASCII + LF 并重跑验证。
+
+阶段 15 Personal Install Readiness 运行 `29572098688` 在保留上述审计和归档能力的同时，新增双平台临时用户目录安装验收。Dependency audit、macOS personal build/install、Windows personal build/install 三个 Job 全部通过，其中 Windows 安装步骤在真实 `windows-2022` Runner 执行成功。
 
 ### 24.3 个人安装模型
 
