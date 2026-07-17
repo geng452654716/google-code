@@ -14,13 +14,22 @@ abstract interface class SecureKeyStore {
 
 /// Keychain/Credential Manager implementation exposed by the desktop runner.
 class MethodChannelSecureKeyStore implements SecureKeyStore {
-  MethodChannelSecureKeyStore({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(_channelName);
+  /// Creates a secure key store backed by the desktop method channel.
+  ///
+  /// [platformSupportedOverride] overrides host detection for deterministic
+  /// cross-platform tests.
+  MethodChannelSecureKeyStore({
+    MethodChannel? channel,
+    this.platformSupportedOverride,
+  }) : _channel = channel ?? const MethodChannel(_channelName);
 
   static const _channelName = 'google_code/secure_key_store';
   static const _keyLength = 32;
 
   final MethodChannel _channel;
+
+  /// Optional platform support override used by cross-platform tests.
+  final bool? platformSupportedOverride;
 
   @override
   Future<bool> containsQuickUnlockKey() async {
@@ -66,5 +75,6 @@ class MethodChannelSecureKeyStore implements SecureKeyStore {
     await _channel.invokeMethod<void>('delete');
   }
 
-  bool get _supportsCurrentPlatform => Platform.isMacOS || Platform.isWindows;
+  bool get _supportsCurrentPlatform =>
+      platformSupportedOverride ?? Platform.isMacOS || Platform.isWindows;
 }

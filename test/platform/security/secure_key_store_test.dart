@@ -26,7 +26,10 @@ void main() {
         return null;
       });
 
-      final keyStore = MethodChannelSecureKeyStore(channel: channel);
+      final keyStore = MethodChannelSecureKeyStore(
+        channel: channel,
+        platformSupportedOverride: true,
+      );
 
       await expectLater(
         keyStore.readQuickUnlockKey(),
