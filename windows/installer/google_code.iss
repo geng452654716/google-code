@@ -46,7 +46,8 @@ VersionInfoProductVersion={#AppVersion}
 VersionInfoCompany={#AppPublisher}
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; Default.isl is bundled with every Inno Setup installation. Optional language
+; packs are intentionally not required so a clean CI runner can compile the EXE.
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]

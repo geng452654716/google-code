@@ -35,6 +35,8 @@ void main() {
       expect(innoDefinition, contains(r'DefaultDirName={localappdata}'));
       expect(innoDefinition, contains('CloseApplications=yes'));
       expect(innoDefinition, contains('RestartApplications=no'));
+      expect(innoDefinition, contains('compiler:Default.isl'));
+      expect(innoDefinition, isNot(contains('ChineseSimplified.isl')));
       expect(innoDefinition, isNot(contains('PrivilegesRequired=admin')));
       expect(innoDefinition, isNot(contains(r'{userappdata}')));
       expect(innoDefinition, isNot(contains(r'DestDir: "{userappdata}')));
