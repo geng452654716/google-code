@@ -1,7 +1,6 @@
 #include "flutter_window.h"
 
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 #include <wtsapi32.h>
 
@@ -95,14 +94,9 @@ std::optional<std::vector<uint8_t>> ReadClipboardBitmap() {
 
 /// Registers the native clipboard-image method used by the Dart import layer.
 void RegisterClipboardImportChannel(flutter::FlutterEngine* engine) {
-  FlutterDesktopPluginRegistrarRef registrar_ref =
-      engine->GetRegistrarForPlugin("ClipboardImport");
-  auto* registrar =
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref);
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "google_code/clipboard_import",
+          engine->messenger(), "google_code/clipboard_import",
           &flutter::StandardMethodCodec::GetInstance());
   channel->SetMethodCallHandler([](const auto& call, auto result) {
     if (call.method_name() != "readImage") {
@@ -127,14 +121,9 @@ void RegisterClipboardImportChannel(flutter::FlutterEngine* engine) {
 
 /// Registers the native in-memory Windows region screenshot method.
 void RegisterScreenCaptureChannel(flutter::FlutterEngine* engine, HWND owner) {
-  FlutterDesktopPluginRegistrarRef registrar_ref =
-      engine->GetRegistrarForPlugin("ScreenCapture");
-  auto* registrar =
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref);
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "google_code/screen_capture",
+          engine->messenger(), "google_code/screen_capture",
           &flutter::StandardMethodCodec::GetInstance());
   channel->SetMethodCallHandler([owner](const auto& call, auto result) {
     if (call.method_name() == "openScreenRecordingSettings") {
@@ -219,15 +208,10 @@ void FlutterWindow::OnDestroy() {
 }
 
 void FlutterWindow::RegisterSystemSessionEventChannel() {
-  FlutterDesktopPluginRegistrarRef registrar_ref =
-      flutter_controller_->engine()->GetRegistrarForPlugin(
-          "SystemSessionEvents");
-  auto* registrar =
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref);
   system_session_event_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "google_code/system_session_events",
+          flutter_controller_->engine()->messenger(),
+          "google_code/system_session_events",
           &flutter::StandardMethodCodec::GetInstance());
 }
 

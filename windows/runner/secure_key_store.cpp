@@ -2,7 +2,6 @@
 
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 #include <windows.h>
 #include <wincred.h>
@@ -97,14 +96,9 @@ bool DeleteQuickUnlockKey() {
 }  // namespace
 
 void RegisterSecureKeyStoreChannel(flutter::FlutterEngine* engine) {
-  FlutterDesktopPluginRegistrarRef registrar_ref =
-      engine->GetRegistrarForPlugin("SecureKeyStore");
-  auto* registrar =
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref);
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "google_code/secure_key_store",
+          engine->messenger(), "google_code/secure_key_store",
           &flutter::StandardMethodCodec::GetInstance());
   channel->SetMethodCallHandler([](const auto& call, auto result) {
     if (call.method_name() == "contains") {

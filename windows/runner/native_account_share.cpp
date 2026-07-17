@@ -2,7 +2,6 @@
 
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
 #include <memory>
@@ -16,9 +15,10 @@
 #include <windows.applicationmodel.datatransfer.h>
 #include <windows.storage.streams.h>
 
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
 #include <winrt/Windows.Storage.Streams.h>
-#include <winrt/base.h>
 
 namespace native_account_share {
 namespace {
@@ -154,14 +154,9 @@ const std::vector<uint8_t>* FindBytes(const flutter::EncodableMap& arguments,
 }  // namespace
 
 void RegisterChannel(flutter::FlutterEngine* engine, HWND owner) {
-  FlutterDesktopPluginRegistrarRef registrar_ref =
-      engine->GetRegistrarForPlugin("NativeAccountShare");
-  auto* registrar =
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar_ref);
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "google_code/native_account_share",
+          engine->messenger(), "google_code/native_account_share",
           &flutter::StandardMethodCodec::GetInstance());
   auto coordinator = std::make_shared<NativeShareCoordinator>(owner);
 
