@@ -80,4 +80,4 @@
 2. 在 macOS Sandbox/签名环境验收屏幕锁定、快速用户切换、显示器睡眠、系统睡眠及唤醒后必须重新认证。
 3. 在 macOS 与 Windows 真机验收 `.gcbak` 文件对话框、二维码保存、截图和系统安全存储权限行为。
 4. 使用真实 Google Authenticator 导出样本继续完成阶段 6 兼容性回归。
-5. 评估 macOS `NSSharingServicePicker` 与 Windows `DataTransferManager`，增加系统分享面板并保留复制/保存降级路径。
+5. [已由阶段 11 完成] 接入 macOS `NSSharingServicePicker` 与 Windows `DataTransferManager`，并保留复制/保存降级路径；见 `docs/PHASE11_STATUS.md`。

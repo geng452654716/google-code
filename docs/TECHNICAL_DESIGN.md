@@ -730,7 +730,7 @@ Dart 使用垃圾回收，不能保证明文字节被立即物理覆写。技术
 
 ## 15. 单个账号分享
 
-阶段 7 已实现本节首版跨平台闭环，阶段 9 已增加设备认证重新验证；系统分享面板仍属于后续增强。
+阶段 7 已实现首版复制/保存闭环，阶段 9 已增加设备认证重新验证，阶段 11 已接入 macOS 与 Windows 原生系统分享面板。
 
 ### 15.1 已实现分享材料
 
@@ -751,7 +751,7 @@ sequenceDiagram
     participant C as VaultSessionController
     participant R as VaultRepository
     participant S as AccountShareService
-    participant OS as Clipboard or File Picker
+    participant OS as Clipboard, File Picker, or Share Surface
 
     U->>UI: 点击分享账号
     UI->>U: 显示长期凭据风险警告
@@ -767,8 +767,13 @@ sequenceDiagram
     end
     UI->>S: create(account)
     S-->>UI: Secret / URI / QR PNG
-    U->>UI: 显示、复制或保存
-    UI->>OS: 30 秒敏感复制或用户选择路径保存
+    U->>UI: 显示、复制、保存或一键系统分享
+    alt 复制或保存
+        UI->>OS: 30 秒敏感复制或用户选择路径保存
+    else 原生系统分享
+        UI->>OS: 内存文本 + QR PNG
+        OS-->>UI: 分享面板已展示
+    end
     UI->>UI: 操作后、60 秒、失焦或锁定时隐藏
 ```
 
@@ -785,16 +790,19 @@ sequenceDiagram
 - Secret 和 URI 使用 30 秒敏感剪贴板 TTL；清理前比较当前内容，避免覆盖用户后续复制的数据。
 - `SensitiveClipboardService` 由应用级 Riverpod Provider 持有，账号页面锁定销毁不会取消待执行的清理计时器。
 - 保存二维码必须由用户通过系统对话框选择路径，应用不创建临时文件或隐藏副本。
-- 复制或保存成功后立即隐藏当前分享材料。
+- 复制、保存或系统分享面板成功打开后立即隐藏当前分享材料。
 - TOTP Secret 一旦分享无法由本应用撤销；必须在对应服务重新绑定二次验证。
 
-### 15.4 尚未实现的平台分享
+### 15.4 原生系统分享
 
-首版不强制系统分享面板，当前始终提供复制 Secret、复制 URI 和保存二维码 PNG。后续可定义统一 `SystemShareService`：
+阶段 11 新增统一 `NativeAccountShareService`，MethodChannel 为 `google_code/native_account_share`，方法为 `shareAccount`。调用一次发送标题、包含账号标识/Secret/URI/风险提示的正文，以及与 URI 一致的 QR PNG：
 
-- macOS：封装 NSSharingServicePicker 或等价能力。
-- Windows：评估 DataTransferManager 桌面支持；不可靠时继续使用复制和保存降级路径。
-- 调用系统分享后无法控制目标应用如何处理 Secret，启用前必须继续保留明确风险确认。
+- macOS：使用 `NSSharingServicePicker`，只向系统传递内存中的 `String` 和 `NSImage`；选择或取消后释放应用侧引用。
+- Windows：通过 `IDataTransferManagerInterop` 获取窗口级 `DataTransferManager`，在 `DataRequested` 中写入 `DataPackage`；QR PNG 使用内存 `IStream` 包装为 `IRandomAccessStream` 后交给 `SetBitmap`。
+- 两个平台均不为一键分享创建明文临时文件；原生面板展示后 Dart 立即释放 `_material` 并要求再次重新认证。
+- 平台不可用或调用失败时继续提供复制 Secret、复制 URI 和保存二维码 PNG 降级路径。
+- 系统面板展示只表示操作系统已接管分享流程，不表示目标应用最终发送成功；目标应用如何缓存、同步或转发 Secret 不受本应用控制。
+- Windows 原生实现仍需 Windows 10/11 真机 MSVC 编译与分享目标矩阵验收。
 
 ## 16. 加密备份与恢复
 
@@ -1108,7 +1116,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 | 剪贴板图片 | 必测 | 发布前 | 必测 | 必测 |
 | 摄像头 | P1 | P1 | P1 | P1 |
 | 文件备份恢复 | 必测 | 发布前 | 必测 | 必测 |
-| 系统分享 | P1 | P1 | P1/降级 | P1/降级 |
+| 系统分享 | 已实现/待人工验收 | 发布前 | 已实现/待真机 | 已实现/待真机 |
 | 系统锁屏自动锁定 | 必测 | 发布前 | 必测 | 必测 |
 
 ### 23.5 安全测试
@@ -1193,7 +1201,7 @@ P0 不实现自动更新。后续若增加：
 
 - macOS 摄像头插件。
 - Windows 摄像头插件。
-- 系统分享面板和降级策略。
+- [阶段 11 已实现] 系统分享面板和复制/保存降级策略。
 - 完整平台矩阵验证。
 
 ### 阶段 5：P2 体验与发布
@@ -1291,7 +1299,7 @@ P0 不实现自动更新。后续若增加：
 - [x] 主密码与快速解锁流程已实现并完成 Dart/macOS 验证；Windows 真机验收待完成。
 - [x] P0 图片 QR、剪贴板和区域截图 PoC 已完成；Windows 原生实现仍待目标平台验证。
 - [x] Google 迁移固定 fixtures、真实迁移 QR PNG 和批量界面闭环测试已准备。
-- [x] 单账号安全分享已确认为迁移导入后的下一开发阶段。
+- [x] 单账号安全分享及 macOS/Windows 原生系统分享已实现；Windows 真机验收待完成。
 - [ ] 摄像头平台方案已完成 P1 PoC。
 - [ ] 日志脱敏和临时文件策略已评审。
 - [ ] CI、签名和发布方式已确认。

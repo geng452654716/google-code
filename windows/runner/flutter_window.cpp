@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "native_account_share.h"
 #include "screen_capture.h"
 #include "secure_key_store.h"
 
@@ -187,6 +188,7 @@ bool FlutterWindow::OnCreate() {
   RegisterClipboardImportChannel(flutter_controller_->engine());
   RegisterScreenCaptureChannel(flutter_controller_->engine(), GetHandle());
   RegisterSecureKeyStoreChannel(flutter_controller_->engine());
+  native_account_share::RegisterChannel(flutter_controller_->engine(), GetHandle());
   RegisterSystemSessionEventChannel();
   wts_session_notifications_registered_ =
       WTSRegisterSessionNotification(GetHandle(), NOTIFY_FOR_THIS_SESSION) ==

@@ -7,6 +7,7 @@ import '../../app/state/providers.dart';
 import '../../application/share/account_share_service.dart';
 import '../../domain/entities/account.dart';
 import '../../platform/auth/local_authentication_service.dart';
+import '../../platform/sharing/native_account_share_service.dart';
 
 /// Sensitive clipboard writer supplied by the unlocked account page.
 typedef SensitiveShareTextWriter =
@@ -41,6 +42,7 @@ class _AccountShareDialogState extends ConsumerState<AccountShareDialog>
   bool _showSensitiveText = false;
   bool _isAuthenticating = false;
   bool _isSaving = false;
+  bool _isSharing = false;
   bool _isClosingForVaultLock = false;
   bool _canUseDeviceAuthentication = false;
   String _deviceAuthenticationName = '设备认证';
@@ -134,11 +136,13 @@ class _AccountShareDialogState extends ConsumerState<AccountShareDialog>
             ]
           : [
               TextButton(
-                onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+                onPressed: _isSaving || _isSharing
+                    ? null
+                    : () => Navigator.of(context).pop(),
                 child: const Text('关闭'),
               ),
               FilledButton.icon(
-                onPressed: _isSaving
+                onPressed: _isSaving || _isSharing
                     ? null
                     : () => _conceal('分享内容已隐藏，如需继续请重新验证。'),
                 icon: const Icon(Icons.visibility_off_rounded),
@@ -292,6 +296,46 @@ class _AccountShareDialogState extends ConsumerState<AccountShareDialog>
           ),
           _ShareFormat.qr => _buildQrMaterial(context, material),
         },
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: colors.primaryContainer,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '一键系统分享',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '将账号名称、Base32 Secret、otpauth:// 链接和二维码一起交给系统分享面板。'
+                '应用不会创建明文临时文件，面板打开后本窗口会立即隐藏分享内容。',
+                style: TextStyle(color: colors.onPrimaryContainer),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                key: const ValueKey('share-native-account'),
+                onPressed: _isSaving || _isSharing
+                    ? null
+                    : () => _shareThroughSystem(material),
+                icon: _isSharing
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.ios_share_rounded),
+                label: Text(_isSharing ? '正在打开…' : '分享 Secret + 二维码'),
+              ),
+            ],
+          ),
+        ),
         if (_error case final error?) ...[
           const SizedBox(height: 12),
           Text(error, style: TextStyle(color: colors.error)),
@@ -485,6 +529,45 @@ class _AccountShareDialogState extends ConsumerState<AccountShareDialog>
     }
   }
 
+  /// Sends the complete portable account package to the native share surface.
+  Future<void> _shareThroughSystem(AccountShareMaterial material) async {
+    setState(() {
+      _isSharing = true;
+      _error = null;
+      _status = null;
+    });
+    try {
+      final result = await ref
+          .read(nativeAccountShareServiceProvider)
+          .share(
+            NativeAccountSharePayload(
+              title: _nativeShareTitle(),
+              text: _nativeShareText(material),
+              qrPng: material.qrPng,
+            ),
+          );
+      if (!mounted) return;
+      switch (result) {
+        case NativeAccountShareResult.presented:
+          _conceal('系统分享面板已打开。为保护凭据，分享内容已隐藏。');
+        case NativeAccountShareResult.cancelled:
+          _conceal('已取消系统分享。分享内容已隐藏，如需继续请重新验证。');
+        case NativeAccountShareResult.unavailable:
+          setState(() {
+            _isSharing = false;
+            _error = '当前系统无法打开分享面板，请使用复制或保存二维码。';
+          });
+      }
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _isSharing = false;
+          _error = '系统分享失败，请使用复制或保存二维码。';
+        });
+      }
+    }
+  }
+
   Future<void> _saveQr(AccountShareMaterial material) async {
     setState(() {
       _isSaving = true;
@@ -539,10 +622,32 @@ class _AccountShareDialogState extends ConsumerState<AccountShareDialog>
       _material = null;
       _showSensitiveText = false;
       _isSaving = false;
+      _isSharing = false;
       _remainingSeconds = 0;
       _error = null;
       _status = status;
     });
+  }
+
+  /// Builds a non-secret title suitable for native share target metadata.
+  String _nativeShareTitle() {
+    final label = widget.account.issuer.isEmpty
+        ? widget.account.accountName
+        : '${widget.account.issuer} · ${widget.account.accountName}';
+    return '$label TOTP 凭据';
+  }
+
+  /// Builds the text companion shared alongside the in-memory QR image.
+  String _nativeShareText(AccountShareMaterial material) {
+    final label = widget.account.issuer.isEmpty
+        ? widget.account.accountName
+        : '${widget.account.issuer} · ${widget.account.accountName}';
+    return [
+      'TOTP 账号：$label',
+      'Base32 Secret：${material.secret}',
+      '配置链接：${material.otpAuthUri}',
+      '安全提示：获得这些内容的人可以持续生成该账号的验证码。',
+    ].join('\n');
   }
 
   String _suggestedFileName() {

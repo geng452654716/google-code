@@ -11,6 +11,7 @@ import 'package:google_code/features/accounts/account_share_dialog.dart';
 import 'package:google_code/platform/files/account_share_file_saver.dart';
 import 'package:google_code/platform/auth/local_authentication_service.dart';
 import 'package:google_code/platform/security/secure_key_store.dart';
+import 'package:google_code/platform/sharing/native_account_share_service.dart';
 
 void main() {
   final account = Account(
@@ -32,12 +33,14 @@ void main() {
   ) async {
     final repository = _ShareRepository(account);
     final saver = _MemoryShareFileSaver();
+    final nativeShare = _MemoryNativeAccountShareService();
     final copied = <({String text, Duration ttl})>[];
     await _pumpShareDialog(
       tester,
       account: account,
       repository: repository,
       saver: saver,
+      nativeShareService: nativeShare,
       writeSensitiveText: (text, ttl) async {
         copied.add((text: text, ttl: ttl));
       },
@@ -102,6 +105,21 @@ void main() {
     expect(saver.savedBytes, isNotEmpty);
     expect(saver.suggestedName, 'Example-Service-alice@example.com-totp.png');
     expect(find.textContaining('二维码已保存'), findsOneWidget);
+
+    await _authenticate(tester, 'password123');
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('share-native-account')),
+    );
+    await tester.tap(find.byKey(const ValueKey('share-native-account')));
+    await tester.pump();
+    await tester.pump();
+    expect(nativeShare.payload, isNotNull);
+    expect(nativeShare.payload!.title, contains('Example Service'));
+    expect(nativeShare.payload!.text, contains(account.secret));
+    expect(nativeShare.payload!.text, contains('otpauth://totp/'));
+    expect(nativeShare.payload!.qrPng, isNotEmpty);
+    expect(find.textContaining('系统分享面板已打开'), findsOneWidget);
+    expect(find.byKey(const ValueKey('share-master-password')), findsOneWidget);
   });
 
   testWidgets(
@@ -237,6 +255,7 @@ Future<ProviderContainer> _pumpShareDialog(
   required _ShareRepository repository,
   required AccountShareFileSaver saver,
   required SensitiveShareTextWriter writeSensitiveText,
+  NativeAccountShareService? nativeShareService,
   Duration revealDuration = const Duration(seconds: 60),
   LocalAuthenticationService? authentication,
   SecureKeyStore? keyStore,
@@ -252,6 +271,10 @@ Future<ProviderContainer> _pumpShareDialog(
           () => _UnlockedShareController(repository.payload),
         ),
         accountShareFileSaverProvider.overrideWithValue(saver),
+        if (nativeShareService != null)
+          nativeAccountShareServiceProvider.overrideWithValue(
+            nativeShareService,
+          ),
         if (authentication != null)
           localAuthenticationServiceProvider.overrideWithValue(authentication),
         if (keyStore != null)
@@ -408,5 +431,18 @@ class _MemoryShareFileSaver implements AccountShareFileSaver {
     savedBytes = Uint8List.fromList(pngBytes);
     this.suggestedName = suggestedName;
     return true;
+  }
+}
+
+/// Captures the complete native share request without opening an OS surface.
+class _MemoryNativeAccountShareService implements NativeAccountShareService {
+  NativeAccountSharePayload? payload;
+
+  @override
+  Future<NativeAccountShareResult> share(
+    NativeAccountSharePayload payload,
+  ) async {
+    this.payload = payload;
+    return NativeAccountShareResult.presented;
   }
 }

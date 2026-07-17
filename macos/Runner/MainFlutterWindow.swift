@@ -81,8 +81,51 @@ private final class SystemSessionEventEmitter {
   }
 }
 
+/// Retains an in-memory NSSharingServicePicker until the user chooses or cancels.
+private final class NativeAccountShareCoordinator: NSObject, NSSharingServicePickerDelegate {
+  private weak var window: NSWindow?
+  private var picker: NSSharingServicePicker?
+  private var retainedItems: [Any] = []
+
+  init(window: NSWindow) {
+    self.window = window
+  }
+
+  /// Presents text and QR image bytes without creating a plaintext temporary file.
+  func present(text: String, qrPng: Data) -> Bool {
+    guard picker == nil, let window, let contentView = window.contentView,
+      let image = NSImage(data: qrPng)
+    else {
+      return false
+    }
+
+    retainedItems = [text, image]
+    let picker = NSSharingServicePicker(items: retainedItems)
+    picker.delegate = self
+    self.picker = picker
+
+    let anchor = NSRect(
+      x: contentView.bounds.midX,
+      y: contentView.bounds.maxY - 1,
+      width: 1,
+      height: 1)
+    picker.show(relativeTo: anchor, of: contentView, preferredEdge: .minY)
+    return true
+  }
+
+  /// Releases the only application-owned references after selection or cancel.
+  func sharingServicePicker(
+    _ sharingServicePicker: NSSharingServicePicker,
+    didChoose service: NSSharingService?
+  ) {
+    picker = nil
+    retainedItems.removeAll(keepingCapacity: false)
+  }
+}
+
 class MainFlutterWindow: NSWindow {
   private var systemSessionEventEmitter: SystemSessionEventEmitter?
+  private var nativeAccountShareCoordinator: NativeAccountShareCoordinator?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -94,11 +137,57 @@ class MainFlutterWindow: NSWindow {
     registerClipboardImportChannel(with: flutterViewController)
     registerScreenCaptureChannel(with: flutterViewController)
     registerSecureKeyStoreChannel(with: flutterViewController)
+    registerNativeAccountShareChannel(with: flutterViewController)
     let sessionRegistrar = flutterViewController.registrar(forPlugin: "SystemSessionEvents")
     systemSessionEventEmitter = SystemSessionEventEmitter(
       messenger: sessionRegistrar.messenger)
 
     super.awakeFromNib()
+  }
+
+  /// Exposes the native macOS share picker for one ephemeral account package.
+  private func registerNativeAccountShareChannel(with controller: FlutterViewController) {
+    let registrar = controller.registrar(forPlugin: "NativeAccountShare")
+    let channel = FlutterMethodChannel(
+      name: "google_code/native_account_share",
+      binaryMessenger: registrar.messenger)
+    let coordinator = NativeAccountShareCoordinator(window: self)
+    nativeAccountShareCoordinator = coordinator
+
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "shareAccount" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard
+        let arguments = call.arguments as? [String: Any],
+        let title = arguments["title"] as? String,
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        let text = arguments["text"] as? String,
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        let typedData = arguments["qrPng"] as? FlutterStandardTypedData,
+        !typedData.data.isEmpty,
+        typedData.data.count <= 5 * 1024 * 1024
+      else {
+        result(
+          FlutterError(
+            code: "invalid_share_payload",
+            message: "The native share payload is missing or invalid.",
+            details: nil))
+        return
+      }
+      guard coordinator.present(text: text, qrPng: typedData.data) else {
+        result(
+          FlutterError(
+            code: "share_unavailable",
+            message: "The macOS share picker could not be presented.",
+            details: nil))
+        return
+      }
+
+      // Return immediately so Dart can conceal its copy while the picker is open.
+      result("presented")
+    }
   }
 
   /// Exposes clipboard image bytes without writing sensitive data to disk.

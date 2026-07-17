@@ -4,14 +4,14 @@
 
 ## 当前状态
 
-项目已完成阶段 1 至阶段 10 的主要开发闭环：本地加密 Vault、账号 CRUD、TOTP、多入口二维码导入、Google Authenticator 迁移二维码批量导入、单账号安全分享、独立 `.gcbak` 加密备份恢复、设备快速解锁，以及系统锁屏、会话断开和睡眠触发的立即自动锁定均已实现。分享 Secret、URI 或二维码前可使用 Touch ID / Windows Hello 重新验证，主密码入口和恢复能力始终保留。当前完整验证为 `flutter analyze` 0 issues、`flutter test` 96 tests，macOS Debug 应用构建成功；阶段 10 详情见 `docs/PHASE10_STATUS.md`。Windows 原生代码仍需在 Windows 10/11 真机编译与运行，真实 Google Authenticator 导出样本、系统会话事件真机矩阵、系统分享面板及目标平台文件对话框人工验收仍待后续阶段完成。
+项目已完成阶段 1 至阶段 11 的主要开发闭环：本地加密 Vault、账号 CRUD、TOTP、多入口二维码导入、Google Authenticator 迁移二维码批量导入、单账号安全分享、独立 `.gcbak` 加密备份恢复、设备快速解锁、系统锁屏/会话断开/睡眠自动锁定，以及 macOS/Windows 原生系统分享均已实现。分享完整账号包前可使用 Touch ID / Windows Hello 重新验证，主密码入口和复制 Secret、复制 URI、保存二维码降级能力始终保留；系统分享只传递内存文本与 QR PNG，不创建明文临时文件。当前完整验证为 `flutter analyze` 0 issues、`flutter test` 100 tests，macOS Debug 应用构建成功；阶段 11 详情见 `docs/PHASE11_STATUS.md`。Windows 原生代码仍需在 Windows 10/11 真机编译与运行，真实 Google Authenticator 导出样本、系统会话事件、系统分享目标矩阵及目标平台文件对话框人工验收仍待完成。
 
 详细进度见：
 
 - `docs/PRD.md`
 - `docs/TECHNICAL_DESIGN.md`
 - `docs/PHASE0_STATUS.md`
-- `docs/PHASE1_STATUS.md` 至 `docs/PHASE10_STATUS.md`
+- `docs/PHASE1_STATUS.md` 至 `docs/PHASE11_STATUS.md`
 - `docs/adr/0001-foundation-stack.md`
 
 ## 环境
@@ -41,7 +41,7 @@ lib/
   domain/         无 Flutter 平台依赖的 TOTP 领域逻辑
   data/vault/     设备 Vault envelope、加解密与文件存储
   data/backup/    独立备份 envelope 与加解密
-  platform/       二维码、剪贴板、截图、安全存储和系统会话等平台边界
+  platform/       二维码、剪贴板、截图、安全存储、系统会话和原生分享等平台边界
   features/       桌面端功能页面
 ```
 
