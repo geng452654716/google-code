@@ -199,3 +199,7 @@ UNSIGNED_BUILD.txt
 3. 增加 macOS 公证与 stapling、Windows 安装包及 SmartScreen 验证，不直接把当前 unsigned Artifact 作为公开 Release。
 4. 增加 CycloneDX/SPDX SBOM、已知漏洞扫描、Dependabot/依赖审查和仓库 Secret scanning 基线。
 5. 在可信签名和真机验收完成后，再设计版本 Tag、GitHub Release、更新策略和发布回滚流程。
+
+## 阶段 15 范围调整（2026-07-17）
+
+用户已确认 Google Code 只供自己安装和使用，不需要公开发布。因此本页“当前限制与风险”中关于可信签名、公证、MSIX/MSI、GitHub Release 和商店发布的项目仍是客观分发限制，但不再是近期阶段退出条件。阶段 15 转为实现 macOS/Windows 当前用户级安装、可恢复升级、卸载默认保留数据和 CI 安装冒烟验证；详见 `docs/PHASE15_STATUS.md`。

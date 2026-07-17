@@ -1150,7 +1150,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 ## 24. CI/CD
 
-阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14 进一步新增 `.github/workflows/release-readiness.yml`，仅允许手动触发 Release 模式构建、依赖来源/许可证审计和校验值生成，避免增加每次普通提交的 CI 负担。
+阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14 新增 `.github/workflows/release-readiness.yml`，阶段 15 将其定位调整为手动 Personal Install Readiness：执行 Release 模式构建、依赖来源/许可证审计、校验值生成，以及 macOS/Windows 临时用户目录安装、重复升级和卸载冒烟测试，避免增加每次普通提交的 CI 负担。
 
 ### 24.1 每次提交
 
@@ -1159,7 +1159,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 - `dart format --output=none --set-exit-if-changed lib test tool`
 - `flutter analyze`
 - `flutter test`
-- Vault、TOTP、导入、摄像头扫描、分享、备份、快速解锁、系统事件和发布元数据审计等 114 项自动化测试。
+- Vault、TOTP、导入、摄像头扫描、分享、备份、快速解锁、系统事件、发布元数据审计和个人安装器等自动化测试。
 
 质量检查通过后并行执行：
 
@@ -1168,7 +1168,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。阶段 13 摄像头实现提交对应运行 `29564583502`：Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建均已通过。阶段 14 最终实现提交对应运行 `29568997087`：Linux 114 项测试以及 macOS/Windows Debug 构建均已通过。CI 结果只代表代码和编译闭环，不代表真实摄像头设备已经验收。
 
-### 24.2 发布构建
+### 24.2 个人 Release 构建与安装验收
 
 阶段 14 已建立手动 Release Readiness 基线：
 
@@ -1176,22 +1176,27 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 - `.dart_tool/package_config.json` 只用于定位本次解析后的包目录；本机 package cache 的镜像路径不会覆盖 lockfile 来源判定，也不会写入发布报告。
 - 生成 `dependency-manifest.json` 和 `THIRD_PARTY_NOTICES.txt`，记录精确版本、依赖关系、lockfile SHA-256、许可证内容 SHA-256 和去重后的许可证文本。
 - 在 `macos-15` 和 `windows-2022` 分别执行 Release 构建，归档应用目录、发布元数据和 `UNSIGNED_BUILD.txt`，并为归档生成独立 SHA-256 文件。
-- Artifact 名称明确包含 `unsigned`，保留 14 天，只用于发布准备和可信设备真机验收。
+- Artifact 名称明确包含 `unsigned`，保留 14 天，只用于本人设备安装准备、问题定位和真机验收；工作流不会创建 GitHub Release。
 - macOS 构建可能带 Xcode ad hoc 签名，但没有 Apple Developer ID 签名或公证；Windows 构建没有 Authenticode 签名。
 - SHA-256 只能验证内容完整性，不能认证发布者或替代可信代码签名。
 - 自动许可证清单是锁定依赖快照，不等同于法律意见；正式分发前仍需人工审查。
 
-正式发布仍需完成：
-
-- Apple Developer ID 签名、公证和 stapling。
-- Windows 代码签名、安装包、SmartScreen 和升级/卸载验证。
-- 签名密钥隔离、短期凭证、最小权限和日志脱敏，禁止在构建日志中输出证书或密码。
-- CycloneDX/SPDX SBOM、已知漏洞扫描、Dependabot/依赖审查和 Secret scanning。
-- 目标平台真机验收、版本 Tag、GitHub Release 和回滚策略。
+当前产品范围是个人自用，不把以下公开分发能力作为阶段退出条件：Apple Developer ID 签名/公证、Windows Authenticode、MSIX/MSI、应用商店、公开 GitHub Release 和自动更新服务。若未来改变分发范围，必须重新启动可信签名、商标、安装包、SBOM、漏洞扫描和目标平台发布评审，不能直接把当前个人安装产物视为公开发布产物。
 
 阶段 14 最终 Release Readiness 运行 `29568998326` 已通过依赖/许可证审计、macOS Release 和 Windows Release 三个 Job。下载最终 Artifact 后，macOS 与 Windows 的独立 SHA-256 均可由 macOS `shasum -c` 验证，且归档包含应用、manifest、notices 和 unsigned 声明。首轮运行曾发现 PowerShell CRLF 导致 Windows 校验文件跨平台不兼容，已在 `7ba1149` 改为无 BOM ASCII + LF 并重跑验证。
 
-### 24.3 更新机制
+### 24.3 个人安装模型
+
+- `tool/install_macos.sh` 默认从本地 Release `.app` 安装到 `~/Applications/Google Code.app`；使用 `ditto` 保留 bundle 内容，并用 `codesign --verify --deep --strict` 验证复制后的 bundle 完整性。
+- `tool/install_windows.ps1` 默认从本地 Windows Release 运行目录安装到 `%LOCALAPPDATA%\Programs\Google Code`，并通过 `WScript.Shell` 为当前用户创建开始菜单快捷方式。
+- 两个平台均先复制到同级 staging，验证后把旧版本移动为 backup，再原子提升新目录；失败时恢复旧版本，成功后清理 transaction 目录。
+- 安装和卸载前检查 `google_code` 进程，避免覆盖正在运行的二进制和插件文件。
+- `--dry-run`/`-DryRun` 不写文件；CI 使用临时目录和跳过快捷方式参数，不污染 Runner 用户目录。
+- 卸载默认只删除脚本管理的应用和快捷方式，不删除 Vault、Keychain/Windows Credential Manager 记录或用户自行保存的 `.gcbak` 文件。
+- 脚本不请求管理员权限、不修改系统 PATH、注册表系统范围或防火墙，不移除 quarantine，也不绕过 Gatekeeper/SmartScreen。
+- 更新方式是从可信本地源码重新构建后再次运行安装脚本；P0/P1 不提供联网自动更新。
+
+### 24.4 更新机制
 
 P0 不实现自动更新。后续若增加：
 
@@ -1255,7 +1260,8 @@ P0 不实现自动更新。后续若增加：
 - 托盘、全局快捷键和快速窗口。
 - 性能优化、可访问性。
 - [阶段 14 已实现基线] 锁定依赖来源/许可证审计、macOS/Windows Release 模式归档和 SHA-256。
-- [待正式发布] Apple Developer ID 签名/公证、Windows Authenticode/安装包、SBOM、漏洞扫描和目标真机发布检查。
+- [阶段 15 已实现] macOS/Windows 当前用户级安装、可恢复覆盖升级、默认保留数据的卸载和 CI 临时目录冒烟测试。
+- [范围外] 个人自用模式不要求 Apple Developer ID、公证、Windows Authenticode、商业安装包、应用商店或公开 GitHub Release；未来如改变分发范围再重新评审。
 
 ## 26. 需求到技术实现映射
 
@@ -1313,7 +1319,7 @@ P0 不实现自动更新。后续若增加：
 
 ## 29. 实施前必须确认的决策
 
-1. 首发是否确定同时支持 macOS 和 Windows。
+1. [已确认] 个人版同时维护 macOS 和 Windows，但不进行公开发布。
 2. 单账号分享是否从 P1 提升为 P0。
 3. Windows 系统分享面板是硬性要求，还是允许复制/保存降级。
 4. 主密码最低规则和自动锁定默认时长。
@@ -1349,7 +1355,7 @@ P0 不实现自动更新。后续若增加：
 - [x] Google 迁移固定 fixtures、真实迁移 QR PNG 和批量界面闭环测试已准备。
 - [x] 单账号安全分享及 macOS/Windows 原生系统分享已实现，Windows 原生实现已通过 MSVC 编译；真机交互验收待完成。
 - [x] 阶段 13 摄像头平台方案已完成 P1 PoC，并通过 Linux 测试及 macOS/Windows Debug 编译；双平台真实摄像头人工验收待完成。
-- [x] 阶段 14 Release Readiness 已建立依赖来源/许可证审计、双平台 Release 模式归档和 SHA-256 基线；可信签名、公证、安装包、SBOM、漏洞扫描和正式发布仍待完成。
+- [x] 阶段 14 已建立依赖来源/许可证审计、双平台 Release 模式归档和 SHA-256 基线；阶段 15 已增加个人用户级安装、升级和卸载闭环。可信签名、公证和公开安装包不属于当前个人自用范围。
 - [ ] 日志脱敏和临时文件策略已评审。
-- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；阶段 14 已补充 unsigned Release 构建，目标平台正式发布方式仍待确认。
+- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；阶段 14 已补充 unsigned Release 构建，阶段 15 已补充双平台个人安装冒烟验证。
 - [x] 工程初始化和阶段 0 核心技术验证已完成，剩余平台验收项继续跟踪。

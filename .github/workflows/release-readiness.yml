@@ -1,4 +1,4 @@
-name: Release Readiness
+name: Personal Install Readiness
 
 on:
   workflow_dispatch:
@@ -44,7 +44,7 @@ jobs:
           if-no-files-found: error
 
   macos-release:
-    name: macOS unsigned release build
+    name: macOS personal build and install
     needs: metadata-audit
     runs-on: macos-15
     timeout-minutes: 45
@@ -64,6 +64,32 @@ jobs:
 
       - name: Build macOS unsigned release
         run: flutter build macos --release
+
+      - name: Smoke test personal macOS install, upgrade, and uninstall
+        shell: bash
+        run: |
+          destination="$RUNNER_TEMP/Google Code.app"
+          dry_run_destination="$RUNNER_TEMP/Google Code Dry Run.app"
+          bash tool/install_macos.sh \
+            --source build/macos/Build/Products/Release/google_code.app \
+            --destination "$dry_run_destination" \
+            --skip-build \
+            --dry-run
+          test ! -e "$dry_run_destination"
+          bash tool/install_macos.sh \
+            --source build/macos/Build/Products/Release/google_code.app \
+            --destination "$destination" \
+            --skip-build
+          test -x "$destination/Contents/MacOS/google_code"
+          bash tool/install_macos.sh \
+            --source build/macos/Build/Products/Release/google_code.app \
+            --destination "$destination" \
+            --skip-build
+          test -x "$destination/Contents/MacOS/google_code"
+          bash tool/install_macos.sh \
+            --destination "$destination" \
+            --uninstall
+          test ! -e "$destination"
 
       - name: Generate release metadata
         run: dart run tool/release_metadata.dart
@@ -100,7 +126,7 @@ jobs:
           if-no-files-found: error
 
   windows-release:
-    name: Windows unsigned release build
+    name: Windows personal build and install
     needs: metadata-audit
     runs-on: windows-2022
     timeout-minutes: 45
@@ -120,6 +146,42 @@ jobs:
 
       - name: Build Windows unsigned release
         run: flutter build windows --release
+
+      - name: Smoke test personal Windows install, upgrade, and uninstall
+        shell: pwsh
+        run: |
+          $source = 'build/windows/x64/runner/Release'
+          $destination = Join-Path $env:RUNNER_TEMP 'Google Code'
+          $dryRunDestination = Join-Path $env:RUNNER_TEMP 'Google Code Dry Run'
+          & ./tool/install_windows.ps1 `
+            -Source $source `
+            -Destination $dryRunDestination `
+            -SkipBuild `
+            -SkipShortcut `
+            -DryRun
+          if (Test-Path -LiteralPath $dryRunDestination) {
+            throw 'Dry run unexpectedly created the destination.'
+          }
+          & ./tool/install_windows.ps1 `
+            -Source $source `
+            -Destination $destination `
+            -SkipBuild `
+            -SkipShortcut
+          if (-not (Test-Path -LiteralPath (Join-Path $destination 'google_code.exe'))) {
+            throw 'Installed executable is missing.'
+          }
+          & ./tool/install_windows.ps1 `
+            -Source $source `
+            -Destination $destination `
+            -SkipBuild `
+            -SkipShortcut
+          & ./tool/install_windows.ps1 `
+            -Destination $destination `
+            -Uninstall `
+            -SkipShortcut
+          if (Test-Path -LiteralPath $destination) {
+            throw 'Uninstall did not remove the application directory.'
+          }
 
       - name: Generate release metadata
         run: dart run tool/release_metadata.dart
