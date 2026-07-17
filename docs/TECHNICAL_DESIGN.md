@@ -1130,15 +1130,23 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 ## 24. CI/CD
 
-建议使用 GitHub Actions 或等价 CI：
+阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。
 
 ### 24.1 每次提交
 
-- `dart format --output=none --set-exit-if-changed .`
+质量检查使用 `ubuntu-24.04`：
+
+- `dart format --output=none --set-exit-if-changed lib test tool`
 - `flutter analyze`
 - `flutter test`
-- Vault 和 TOTP 安全测试。
-- macOS、Windows debug build。
+- Vault、TOTP、导入、分享、备份、快速解锁和系统事件等 100 项自动化测试。
+
+质量检查通过后并行执行：
+
+- `macos-15`：`flutter build macos --debug`
+- `windows-2022`：`flutter build windows --debug`
+
+macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。最终阶段 12 运行已同时通过 Linux 质量检查、macOS Debug 构建和 Windows MSVC Debug 构建。
 
 ### 24.2 发布构建
 
@@ -1202,7 +1210,8 @@ P0 不实现自动更新。后续若增加：
 - macOS 摄像头插件。
 - Windows 摄像头插件。
 - [阶段 11 已实现] 系统分享面板和复制/保存降级策略。
-- 完整平台矩阵验证。
+- [阶段 12 已实现] Linux 质量检查与 macOS/Windows Debug CI 编译闭环。
+- 完整平台真机运行矩阵验证。
 
 ### 阶段 5：P2 体验与发布
 
@@ -1296,11 +1305,11 @@ P0 不实现自动更新。后续若增加：
 - [x] Flutter 3.44.0 和 Dart 3.12.0 已通过 FVM 固定。
 - [ ] macOS、Windows 最低版本已确认。
 - [ ] Vault envelope 和 KDF 参数已评审。
-- [x] 主密码与快速解锁流程已实现并完成 Dart/macOS 验证；Windows 真机验收待完成。
-- [x] P0 图片 QR、剪贴板和区域截图 PoC 已完成；Windows 原生实现仍待目标平台验证。
+- [x] 主密码与快速解锁流程已实现并完成 Dart/macOS 验证，Windows 原生代码已通过 MSVC 编译；Windows 真机验收待完成。
+- [x] P0 图片 QR、剪贴板和区域截图 PoC 已完成；Windows 原生实现已通过 MSVC 编译，待目标平台运行验证。
 - [x] Google 迁移固定 fixtures、真实迁移 QR PNG 和批量界面闭环测试已准备。
-- [x] 单账号安全分享及 macOS/Windows 原生系统分享已实现；Windows 真机验收待完成。
+- [x] 单账号安全分享及 macOS/Windows 原生系统分享已实现，Windows 原生实现已通过 MSVC 编译；真机交互验收待完成。
 - [ ] 摄像头平台方案已完成 P1 PoC。
 - [ ] 日志脱敏和临时文件策略已评审。
-- [ ] CI、签名和发布方式已确认。
+- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；签名、公证、安装包和正式发布方式仍待确认。
 - [x] 工程初始化和阶段 0 核心技术验证已完成，剩余平台验收项继续跟踪。

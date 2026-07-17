@@ -1,7 +1,7 @@
 # 阶段 11 状态：原生系统分享
 
 - 完成日期：2026-07-17
-- 当前结论：已完成单账号完整凭据包的 macOS/Windows 原生系统分享链路。用户必须先通过主密码、Touch ID 或 Windows Hello 重新认证，应用才会按需生成账号名称、Base32 Secret、`otpauth://` URI 和 QR PNG；原生层只接收内存数据，不创建明文临时文件。系统分享面板成功打开后，Flutter 立即释放当前分享材料并要求再次认证。macOS Debug 构建已通过；Windows 原生实现已完成静态审查，仍需 Windows 10/11 真机编译与分享目标矩阵验收。
+- 当前结论：已完成单账号完整凭据包的 macOS/Windows 原生系统分享链路。用户必须先通过主密码、Touch ID 或 Windows Hello 重新认证，应用才会按需生成账号名称、Base32 Secret、`otpauth://` URI 和 QR PNG；原生层只接收内存数据，不创建明文临时文件。系统分享面板成功打开后，Flutter 立即释放当前分享材料并要求再次认证。macOS Debug 构建已通过；阶段 12 已补充 Windows Server 2022/MSVC Debug 编译闭环，仍需 Windows 10/11 真机运行与分享目标矩阵验收。
 
 ## 本阶段已完成
 
@@ -64,7 +64,8 @@ Base32 Secret：<secret>
 - [x] `DataPackage` 接管数据后立即释放 runner 持有的 pending 文本、流和 bitmap 引用。
 - [x] 同一时刻只允许一个 pending 分享请求，避免后一次调用覆盖前一次敏感材料。
 - [x] runner 已链接 `shcore.lib`、`shlwapi.lib` 与 `windowsapp.lib`。
-- [ ] Windows 原生实现尚未在当前 macOS 环境编译；必须在 Windows 10/11 真机完成 MSVC 构建和运行验收。
+- [x] 阶段 12 已在 Windows Server 2022 GitHub Actions Runner 完成 MSVC Debug 编译与链接。
+- [ ] 仍需在 Windows 10/11 真机完成系统分享运行和目标应用验收。
 
 ## 安全生命周期
 
@@ -106,13 +107,14 @@ sequenceDiagram
 | `fvm flutter analyze` | 通过，0 issues |
 | `fvm flutter test` | 通过，100 tests |
 | `fvm flutter build macos --debug` | 通过，生成 `build/macos/Build/Products/Debug/google_code.app` |
-| Windows 原生构建与运行 | 当前环境不可执行；已完成静态审查，待 Windows 10/11 真机验证 |
+| Windows 原生构建 | 阶段 12 GitHub Actions/MSVC Debug 构建通过 |
+| Windows 原生运行 | 待 Windows 10/11 真机验证 |
 
 自动化测试覆盖完整 MethodChannel payload、平台结果映射、MissingPlugin 与不支持平台降级、空字段和超大二维码拒绝，以及分享按钮发送 Secret、URI、QR bytes 后立即隐藏材料并返回重新认证界面。
 
 ## 当前限制与风险
 
-- [ ] Windows 10/11 尚未完成 MSVC 编译；需验证 Windows SDK 头文件、C++/WinRT ABI interop、系统分享 UI 和目标应用接收文本/PNG 的行为。
+- [ ] Windows 原生代码已通过 MSVC 编译；仍需在 Windows 10/11 真机验证系统分享 UI 和目标应用接收文本/PNG 的行为。
 - [ ] Windows 需分别验证打包与当前分发形态下 `DataTransferManager` 的可用性；不可用时必须正确显示降级提示。
 - [ ] macOS 已通过 Debug 编译，但需在目标签名/Sandbox 环境人工验证 AirDrop、邮件、信息等目标是否同时接收文本和二维码。
 - [ ] 系统分享面板成功展示不代表目标应用最终完成发送；应用为缩短凭据生命周期，不等待目标应用结果。
@@ -121,8 +123,8 @@ sequenceDiagram
 
 ## 下一阶段建议
 
-1. 在 Windows 10/11 真机完成 MSVC Debug/Release 构建，并验证系统分享面板、取消、无分享目标、连续分享和应用关闭场景。
+1. 在 Windows 10/11 真机下载阶段 12 CI Debug 产物，并验证系统分享面板、取消、无分享目标、连续分享和应用关闭场景；Release 构建留到发布阶段。
 2. 在 macOS 目标签名/Sandbox 环境验收 AirDrop、邮件、信息等常用分享目标，同时确认 picker 选择/取消后的内存引用释放。
 3. 将 macOS/Windows 原生分享、系统会话事件、设备安全存储和文件对话框纳入发布前真机矩阵。
 4. 使用真实 Google Authenticator 导出样本继续完成阶段 6 兼容性回归。
-5. 进入摄像头二维码扫描 PoC、发布签名/安装包或自动化 CI 阶段。
+5. 进入摄像头二维码扫描 PoC；自动化 Debug CI 已由阶段 12 完成，发布签名和安装包留到后续阶段。
