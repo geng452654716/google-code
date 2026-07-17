@@ -451,11 +451,12 @@ flowchart LR
 当前实现使用自有 Platform Channel，并统一封装在 `ScreenCaptureService` 后：
 
 1. macOS 通过 `CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess` 检查和请求屏幕录制权限。
-2. 调用系统 `screencapture -i -s -c -x` 区域选择器前隐藏自身窗口。
-3. 截图成功后直接从 `NSPasteboard` 读取 PNG/TIFF 内存数据，不创建应用临时文件。
-4. 通过 pasteboard `changeCount` 识别取消；成功、取消和失败均恢复并激活应用窗口。
-5. 权限被拒绝时显示解释，并可打开“隐私与安全性 > 屏幕录制”设置。
-6. 截图字节复用图片限制、QR 识别、统一确认、重复检测和 Vault 保存流程。
+2. Dart UI 在调用原生选择器前显示说明对话框，明确鼠标会变成系统十字光标、应用窗口会暂时离开屏幕，并提供“暂不扫描”和“开始框选”。
+3. macOS 将唯一窗口 `miniaturize`，等待 250ms 动画完成后再调用 `screencapture -i -s -c -x`；不再用 `orderOut` 直接隐藏窗口，避免正常截图流程被误认为应用闪退。
+4. 截图成功后直接从 `NSPasteboard` 读取 PNG/TIFF 内存数据，不创建应用临时文件。
+5. 通过 pasteboard `changeCount` 识别取消；成功、取消、进程启动失败和解析异常均执行 `deminiaturize`、`makeKeyAndOrderFront` 和 `NSApp.activate` 恢复窗口。
+6. 取消时 Dart UI 显示“窗口已恢复”的非错误提示；权限被拒绝时显示解释，并可打开“隐私与安全性 > 屏幕录制”设置。
+7. 截图字节复用图片限制、QR 识别、统一确认、重复检测和 Vault 保存流程。
 
 Windows 使用自有 GDI 区域选择器，不依赖 Snipping Tool URI：
 
@@ -1150,7 +1151,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 ## 24. CI/CD
 
-阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14 新增 `.github/workflows/release-readiness.yml`，阶段 15 将其定位调整为手动 Personal Install Readiness：执行 Release 模式构建、依赖来源/许可证审计、校验值生成，以及 macOS/Windows 临时用户目录安装、重复升级和卸载冒烟测试，避免增加每次普通提交的 CI 负担。
+阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14 新增 `.github/workflows/release-readiness.yml`，阶段 15 将其定位调整为手动 Personal Install Readiness。阶段 16 在手动工作流中继续执行 Release 构建、依赖来源/许可证审计和脚本安装闭环，并增加 DMG / Setup EXE 的生成、挂载或静默安装、重复升级、卸载和短期私有 Artifact 上传，避免增加每次普通提交的 CI 负担。
 
 ### 24.1 每次提交
 
@@ -1159,7 +1160,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 - `dart format --output=none --set-exit-if-changed lib test tool`
 - `flutter analyze`
 - `flutter test`
-- Vault、TOTP、导入、摄像头扫描、分享、备份、快速解锁、系统事件、发布元数据审计和个人安装器等自动化测试。
+- Vault、TOTP、导入、摄像头扫描、分享、备份、快速解锁、系统事件、发布元数据审计、个人安装器和个人安装包等自动化测试。
 
 质量检查通过后并行执行：
 
@@ -1168,7 +1169,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两个产物均保留 7 天，缺少产物时 Job 必须失败。阶段 13 摄像头实现提交对应运行 `29564583502`：Linux 106 项测试、macOS AVFoundation Debug 构建和 Windows Media Foundation/MSVC Debug 构建均已通过。阶段 14 最终实现提交对应运行 `29568997087`：Linux 114 项测试以及 macOS/Windows Debug 构建均已通过。阶段 15 实现提交对应运行 `29572050531`：Linux 118 项测试、macOS Debug 和 Windows Debug 均通过；手动 Personal Install Readiness 运行 `29572098688` 进一步在 macOS/Windows Release Runner 完成 dry run、首次安装、重复升级和卸载。CI 结果只代表代码、构建和文件级安装闭环，不代表真实摄像头设备及全部原生交互已经验收。
 
-### 24.2 个人 Release 构建与安装验收
+### 24.2 个人 Release 构建与安装包验收
 
 阶段 14 已建立手动 Release Readiness 基线：
 
@@ -1181,7 +1182,7 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 - SHA-256 只能验证内容完整性，不能认证发布者或替代可信代码签名。
 - 自动许可证清单是锁定依赖快照，不等同于法律意见；正式分发前仍需人工审查。
 
-当前产品范围是个人自用，不把以下公开分发能力作为阶段退出条件：Apple Developer ID 签名/公证、Windows Authenticode、MSIX/MSI、应用商店、公开 GitHub Release 和自动更新服务。若未来改变分发范围，必须重新启动可信签名、商标、安装包、SBOM、漏洞扫描和目标平台发布评审，不能直接把当前个人安装产物视为公开发布产物。
+当前产品范围是个人自用，不把以下公开分发能力作为阶段退出条件：Apple Developer ID 签名/公证、Windows Authenticode、MSIX/MSI、应用商店、公开 GitHub Release 和自动更新服务。阶段 16 的 DMG 与 Inno Setup EXE 只是个人安装容器，不改变这一决策。若未来改变分发范围，必须重新启动可信签名、商标、安装包、SBOM、漏洞扫描和目标平台发布评审，不能直接把当前个人安装产物视为公开发布产物。
 
 阶段 14 最终 Release Readiness 运行 `29568998326` 已通过依赖/许可证审计、macOS Release 和 Windows Release 三个 Job。下载最终 Artifact 后，macOS 与 Windows 的独立 SHA-256 均可由 macOS `shasum -c` 验证，且归档包含应用、manifest、notices 和 unsigned 声明。首轮运行曾发现 PowerShell CRLF 导致 Windows 校验文件跨平台不兼容，已在 `7ba1149` 改为无 BOM ASCII + LF 并重跑验证。
 
@@ -1191,11 +1192,14 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 
 - `tool/install_macos.sh` 默认从本地 Release `.app` 安装到 `~/Applications/Google Code.app`；使用 `ditto` 保留 bundle 内容，并用 `codesign --verify --deep --strict` 验证复制后的 bundle 完整性。
 - `tool/install_windows.ps1` 默认从本地 Windows Release 运行目录安装到 `%LOCALAPPDATA%\Programs\Google Code`，并通过 `WScript.Shell` 为当前用户创建开始菜单快捷方式。
-- 两个平台均先复制到同级 staging，验证后把旧版本移动为 backup，再原子提升新目录；失败时恢复旧版本，成功后清理 transaction 目录。
+- `tool/package_macos_dmg.sh` 使用 `ditto` 把现有 Release `.app` 放入临时 staging，加入指向 `/Applications` 的符号链接，再通过 `hdiutil create -format UDZO` 生成压缩 DMG；生成后执行 `hdiutil verify` 和 SHA-256。
+- `tool/package_windows_exe.ps1` 解析 `pubspec.yaml` 版本、定位 Inno Setup 6 的 `ISCC.exe`，并编译 `windows/installer/google_code.iss`。Setup EXE 使用 `PrivilegesRequired=lowest` 安装到当前用户目录，创建当前用户开始菜单入口，并支持 Inno Setup 原生覆盖升级和卸载。
+- 阶段 15 的两个直接安装脚本均先复制到同级 staging，验证后把旧版本移动为 backup，再原子提升新目录；失败时恢复旧版本，成功后清理 transaction 目录。
 - 安装和卸载前检查 `google_code` 进程，避免覆盖正在运行的二进制和插件文件。
 - `--dry-run`/`-DryRun` 不写文件；CI 使用临时目录和跳过快捷方式参数，不污染 Runner 用户目录。
 - 卸载默认只删除脚本管理的应用和快捷方式，不删除 Vault、Keychain/Windows Credential Manager 记录或用户自行保存的 `.gcbak` 文件。
 - 脚本不请求管理员权限、不修改系统 PATH、注册表系统范围或防火墙，不移除 quarantine，也不绕过 Gatekeeper/SmartScreen。
+- DMG 和 Setup EXE 均生成独立 `.sha256`；校验值用于发现文件损坏，不认证发布者。Windows 安装包会记录 `Get-AuthenticodeSignature` 状态，但当前预期为 `NotSigned`。
 - 更新方式是从可信本地源码重新构建后再次运行安装脚本；P0/P1 不提供联网自动更新。
 
 ### 24.4 更新机制
@@ -1357,7 +1361,7 @@ P0 不实现自动更新。后续若增加：
 - [x] Google 迁移固定 fixtures、真实迁移 QR PNG 和批量界面闭环测试已准备。
 - [x] 单账号安全分享及 macOS/Windows 原生系统分享已实现，Windows 原生实现已通过 MSVC 编译；真机交互验收待完成。
 - [x] 阶段 13 摄像头平台方案已完成 P1 PoC，并通过 Linux 测试及 macOS/Windows Debug 编译；双平台真实摄像头人工验收待完成。
-- [x] 阶段 14 已建立依赖来源/许可证审计、双平台 Release 模式归档和 SHA-256 基线；阶段 15 已增加个人用户级安装、升级和卸载闭环。可信签名、公证和公开安装包不属于当前个人自用范围。
+- [x] 阶段 14 已建立依赖来源/许可证审计和 SHA-256 基线；阶段 15 已增加个人用户级安装、升级和卸载闭环；阶段 16 已增加个人 DMG / Setup EXE。可信签名、公证和公开发布不属于当前个人自用范围。
 - [ ] 日志脱敏和临时文件策略已评审。
-- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；阶段 14 已补充 unsigned Release 构建，阶段 15 已补充双平台个人安装冒烟验证。
+- [x] 阶段 12 Debug CI 已建立并通过 Linux/macOS/Windows 验证；阶段 14 已补充 unsigned Release 构建，阶段 15 已补充双平台个人安装冒烟验证，阶段 16 已补充 DMG 挂载和 Setup EXE 静默安装闭环。
 - [x] 工程初始化和阶段 0 核心技术验证已完成，剩余平台验收项继续跟踪。

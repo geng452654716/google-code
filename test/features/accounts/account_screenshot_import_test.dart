@@ -21,6 +21,7 @@ void main() {
     await _pumpAccountsPage(tester, repository, capture);
 
     await _chooseScreenshot(tester);
+    await _startScreenshotSelection(tester);
     await _pumpUntilFound(tester, find.text('确认导入账号'));
 
     expect(find.textContaining('已从区域截图识别账号'), findsOneWidget);
@@ -41,12 +42,36 @@ void main() {
     await _pumpAccountsPage(tester, repository, capture);
 
     await _chooseScreenshot(tester);
+    await _startScreenshotSelection(tester);
     await tester.pumpAndSettle();
 
     expect(capture.captureCount, 1);
     expect(repository.storedPayload.accounts, isEmpty);
     expect(find.text('确认导入账号'), findsNothing);
     expect(find.text('正在解析…'), findsNothing);
+    expect(find.text('已取消屏幕二维码扫描，应用窗口已恢复。'), findsOneWidget);
+  });
+
+  testWidgets('explains native selector and can stop before minimizing', (
+    tester,
+  ) async {
+    final repository = _UnlockedRepository();
+    final capture = _FakeScreenCaptureService(Uint8List.fromList([1, 2, 3]));
+    await _pumpAccountsPage(tester, repository, capture);
+
+    await _chooseScreenshot(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text('扫描屏幕二维码'), findsOneWidget);
+    expect(find.textContaining('鼠标会变成系统截图的十字光标'), findsOneWidget);
+    expect(find.textContaining('按 Esc'), findsOneWidget);
+    expect(capture.captureCount, 0);
+
+    await tester.tap(find.widgetWithText(TextButton, '暂不扫描'));
+    await tester.pumpAndSettle();
+
+    expect(capture.captureCount, 0);
+    expect(find.textContaining('十字光标'), findsNothing);
   });
 
   testWidgets('permission denial can open system settings', (tester) async {
@@ -61,6 +86,7 @@ void main() {
     await _pumpAccountsPage(tester, repository, capture);
 
     await _chooseScreenshot(tester);
+    await _startScreenshotSelection(tester);
     await _pumpUntilFound(tester, find.text('需要屏幕录制权限'));
 
     expect(find.text('打开系统设置'), findsOneWidget);
@@ -76,7 +102,13 @@ void main() {
 Future<void> _chooseScreenshot(WidgetTester tester) async {
   await tester.tap(find.byType(FloatingActionButton));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('区域截图扫描'));
+  await tester.tap(find.text('扫描屏幕二维码'));
+}
+
+/// Confirms the documented minimize-and-select native screenshot lifecycle.
+Future<void> _startScreenshotSelection(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.tap(find.widgetWithText(FilledButton, '开始框选'));
 }
 
 /// Advances asynchronous import work without waiting on the one-second ticker.

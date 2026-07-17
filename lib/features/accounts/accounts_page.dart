@@ -258,8 +258,8 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
                 Navigator.of(context).pop(_AddAccountAction.screenshot),
             child: const ListTile(
               leading: Icon(Icons.crop_free_rounded),
-              title: Text('区域截图扫描'),
-              subtitle: Text('框选屏幕区域并识别二维码'),
+              title: Text('扫描屏幕二维码'),
+              subtitle: Text('窗口会暂时离开屏幕；拖动框选二维码，Esc 取消'),
             ),
           ),
           SimpleDialogOption(
@@ -331,12 +331,17 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
   /// Captures a selected screen region and reuses the QR import pipeline.
   Future<void> _importFromScreenshot() async {
     if (_isImporting || ref.read(vaultSessionProvider).isProcessing) return;
+    final shouldCapture = await _confirmScreenshotCapture();
+    if (!mounted || !shouldCapture) return;
     setState(() => _isImporting = true);
     try {
       final bytes = await ref
           .read(screenCaptureServiceProvider)
           .captureRegion();
-      if (bytes == null || !mounted) return;
+      if (bytes == null || !mounted) {
+        if (mounted) _showMessage('已取消屏幕二维码扫描，应用窗口已恢复。');
+        return;
+      }
       final result = await ref
           .read(otpImportServiceProvider)
           .decodeImageBytes(bytes, source: OtpImportSource.screenshot);
@@ -356,6 +361,32 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
+  }
+
+  /// Explains the native selector before the app window temporarily leaves the screen.
+  Future<bool> _confirmScreenshotCapture() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('扫描屏幕二维码'),
+        content: const Text(
+          '开始后应用窗口会暂时离开屏幕，鼠标会变成系统截图的十字光标。\n\n'
+          '请拖动框选二维码；如需取消，请按 Esc。完成或取消后，应用窗口会自动恢复。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('暂不扫描'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.crop_free_rounded),
+            label: const Text('开始框选'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   /// Explains macOS permission requirements and optionally opens System Settings.

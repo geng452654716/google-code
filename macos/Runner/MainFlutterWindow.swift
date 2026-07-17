@@ -368,8 +368,26 @@ class MainFlutterWindow: NSWindow {
     }
 
     let pasteboardChangeCount = NSPasteboard.general.changeCount
-    orderOut(nil)
+    // Keep the only application window alive and visible in the Dock. Calling
+    // orderOut made the app appear to have crashed while macOS showed its
+    // crosshair selector. Minimizing gives the user an explicit lifecycle cue
+    // and lets us reliably restore the same window after success or cancel.
+    miniaturize(nil)
 
+    // Allow the minimize animation to finish so the application window is not
+    // accidentally included in the selected screen region.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+      self?.runInteractiveScreenCapture(
+        pasteboardChangeCount: pasteboardChangeCount,
+        result: result)
+    }
+  }
+
+  /// Executes macOS screencapture away from the Flutter platform thread.
+  private func runInteractiveScreenCapture(
+    pasteboardChangeCount: Int,
+    result: @escaping FlutterResult
+  ) {
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       let process = Process()
       let errorPipe = Pipe()
@@ -424,6 +442,9 @@ class MainFlutterWindow: NSWindow {
 
   /// Restores focus after the system screenshot selector exits or is cancelled.
   private func restoreAfterScreenCapture() {
+    if isMiniaturized {
+      deminiaturize(nil)
+    }
     makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
   }

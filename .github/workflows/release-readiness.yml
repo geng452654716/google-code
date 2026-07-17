@@ -94,34 +94,27 @@ jobs:
       - name: Generate release metadata
         run: dart run tool/release_metadata.dart
 
-      - name: Package macOS unsigned release
+      - name: Build and verify personal macOS DMG
         shell: bash
         run: |
-          mkdir -p build/release-package/macos build/release-artifacts
-          cp -R build/macos/Build/Products/Release/google_code.app build/release-package/macos/
-          cp build/release-metadata/dependency-manifest.json build/release-package/macos/
-          cp build/release-metadata/THIRD_PARTY_NOTICES.txt build/release-package/macos/
-          printf '%s\n' \
-            'Google Code unsigned release readiness artifact' \
-            '' \
-            'This build is not signed with an Apple Developer ID certificate or notarized.' \
-            'Xcode may apply an ad hoc signature that does not authenticate the publisher.' \
-            'Use it only for release preparation and trusted-device acceptance testing.' \
-            'The SHA-256 checksum verifies download integrity; it does not authenticate the publisher.' \
-            > build/release-package/macos/UNSIGNED_BUILD.txt
-          tar -czf build/release-artifacts/google-code-macos-unsigned-release.tar.gz \
-            -C build/release-package/macos .
-          cd build/release-artifacts
-          shasum -a 256 google-code-macos-unsigned-release.tar.gz \
-            > google-code-macos-unsigned-release.tar.gz.sha256
+          bash tool/package_macos_dmg.sh --skip-build
+          dmg_path="$(find dist/macos -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -n "$dmg_path"
+          mount_path="$RUNNER_TEMP/google-code-dmg"
+          mkdir -p "$mount_path"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_path" "$dmg_path" >/dev/null
+          trap 'hdiutil detach "$mount_path" >/dev/null' EXIT
+          test -x "$mount_path/Google Code.app/Contents/MacOS/google_code"
+          test -L "$mount_path/Applications"
+          codesign --verify --deep --strict "$mount_path/Google Code.app"
 
-      - name: Upload macOS unsigned release
+      - name: Upload macOS personal DMG
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: google-code-macos-unsigned-release
+          name: google-code-macos-personal-dmg
           path: |
-            build/release-artifacts/google-code-macos-unsigned-release.tar.gz
-            build/release-artifacts/google-code-macos-unsigned-release.tar.gz.sha256
+            dist/macos/*.dmg
+            dist/macos/*.dmg.sha256
           retention-days: 14
           if-no-files-found: error
 
@@ -183,41 +176,74 @@ jobs:
             throw 'Uninstall did not remove the application directory.'
           }
 
-      - name: Generate release metadata
-        run: dart run tool/release_metadata.dart
-
-      - name: Package Windows unsigned release
+      - name: Locate or install Inno Setup 6
         shell: pwsh
         run: |
-          $staging = 'build/release-package/windows'
-          $artifacts = 'build/release-artifacts'
-          New-Item -ItemType Directory -Force -Path $staging, $artifacts | Out-Null
-          Copy-Item 'build/windows/x64/runner/Release' "$staging/app" -Recurse
-          Copy-Item 'build/release-metadata/dependency-manifest.json' $staging
-          Copy-Item 'build/release-metadata/THIRD_PARTY_NOTICES.txt' $staging
-          @(
-            'Google Code unsigned release readiness artifact'
-            ''
-            'This build is not code signed.'
-            'Use it only for release preparation and trusted-device acceptance testing.'
-            'The SHA-256 checksum verifies download integrity; it does not authenticate the publisher.'
-          ) | Set-Content -Encoding utf8 "$staging/UNSIGNED_BUILD.txt"
-          $archive = "$artifacts/google-code-windows-unsigned-release.zip"
-          Compress-Archive -Path "$staging/*" -DestinationPath $archive -CompressionLevel Optimal
-          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          $checksum = "$hash  google-code-windows-unsigned-release.zip`n"
-          [System.IO.File]::WriteAllText(
-            "$archive.sha256",
-            $checksum,
-            [System.Text.Encoding]::ASCII
-          )
+          $compiler = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+          ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if ($null -eq $compiler) {
+            choco install innosetup --no-progress -y
+          }
 
-      - name: Upload Windows unsigned release
+      - name: Build Windows personal setup EXE
+        shell: pwsh
+        run: ./tool/package_windows_exe.ps1 -SkipBuild
+
+      - name: Smoke test setup EXE install, upgrade, and uninstall
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem -LiteralPath 'dist/windows' -Filter '*-setup.exe' |
+            Select-Object -First 1
+          if ($null -eq $setup) {
+            throw 'Setup EXE was not produced.'
+          }
+          $destination = Join-Path $env:RUNNER_TEMP 'Google Code Setup EXE'
+          $preservedFixture = Join-Path $env:RUNNER_TEMP 'personal-vault-fixture.gcvault'
+          [System.IO.File]::WriteAllText($preservedFixture, 'preserve-me')
+          $installArguments = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            "/DIR=`"$destination`""
+          )
+          foreach ($attempt in 1..2) {
+            $process = Start-Process -FilePath $setup.FullName `
+              -ArgumentList $installArguments `
+              -Wait `
+              -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "Setup attempt $attempt failed with exit code $($process.ExitCode)."
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $destination 'google_code.exe'))) {
+              throw 'Installed executable is missing.'
+            }
+          }
+          $uninstaller = Join-Path $destination 'unins000.exe'
+          $process = Start-Process -FilePath $uninstaller `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Uninstall failed with exit code $($process.ExitCode)."
+          }
+          for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $destination); $attempt++) {
+            Start-Sleep -Milliseconds 250
+          }
+          if (Test-Path -LiteralPath $destination) {
+            throw 'Uninstall did not remove the application directory.'
+          }
+          if ((Get-Content -LiteralPath $preservedFixture -Raw) -ne 'preserve-me') {
+            throw 'External Vault fixture was unexpectedly modified.'
+          }
+
+      - name: Upload Windows personal setup EXE
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: google-code-windows-unsigned-release
+          name: google-code-windows-personal-setup
           path: |
-            build/release-artifacts/google-code-windows-unsigned-release.zip
-            build/release-artifacts/google-code-windows-unsigned-release.zip.sha256
+            dist/windows/*-setup.exe
+            dist/windows/*-setup.exe.sha256
           retention-days: 14
           if-no-files-found: error
