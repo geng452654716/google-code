@@ -143,8 +143,12 @@ jobs:
           $archive = "$artifacts/google-code-windows-unsigned-release.zip"
           Compress-Archive -Path "$staging/*" -DestinationPath $archive -CompressionLevel Optimal
           $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          "$hash  google-code-windows-unsigned-release.zip" |
-            Set-Content -Encoding ascii "$archive.sha256"
+          $checksum = "$hash  google-code-windows-unsigned-release.zip`n"
+          [System.IO.File]::WriteAllText(
+            "$archive.sha256",
+            $checksum,
+            [System.Text.Encoding]::ASCII
+          )
 
       - name: Upload Windows unsigned release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
