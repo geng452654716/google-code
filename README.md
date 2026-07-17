@@ -102,6 +102,14 @@ bash tool/install_macos.sh --uninstall
 
 选择“扫描屏幕二维码”后，应用会先说明系统截图流程。开始框选时应用窗口会暂时离开屏幕，鼠标变为系统区域截图的十字光标；拖动框选二维码即可，按 `Esc` 取消。macOS 会最小化而不是直接隐藏唯一窗口，并在成功、取消或异常后恢复并激活窗口。
 
+## 阶段 16 验证摘要
+
+- 最终 Desktop CI：`29575452467`，格式、静态分析、122 tests、macOS/Windows Debug 构建全部通过。
+- 最终 Personal Install Readiness：`29575859931`，DMG 构建/校验/上传以及 Windows Setup EXE 编译、安装、覆盖升级、卸载和上传全部通过。
+- macOS DMG：`GoogleCode-1.0.0-build1-macos-universal.dmg`，最终 CI Artifact SHA-256 为 `fa598464ebe200f60551be0dbba76cdec5226de7f594ea962510efd912b4ae9b`。
+- Windows Setup EXE：`GoogleCode-1.0.0-build1-windows-x64-setup.exe`，SHA-256 为 `dbb9c22504d892ab32fcc1b273d8666d3a221a3a4d71a3d937dfc250b9c9930f`。
+- 完整根因、测试和人工验收项见 `docs/PHASE16_STATUS.md`。
+
 ## 目录
 
 ```text
