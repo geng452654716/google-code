@@ -1,0 +1,30 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('macOS sandbox allows read-only access to user-selected QR images', () {
+    for (final path in <String>[
+      'macos/Runner/DebugProfile.entitlements',
+      'macos/Runner/Release.entitlements',
+    ]) {
+      final entitlements = File(path).readAsStringSync();
+
+      expect(
+        entitlements,
+        contains('com.apple.security.files.user-selected.read-only'),
+        reason: '$path must allow NSOpenPanel to expose a selected image.',
+      );
+    }
+  });
+
+  test('macOS image picker reports a panel display abort as an error', () {
+    final source = File(
+      'macos/Runner/MainFlutterWindow.swift',
+    ).readAsStringSync();
+
+    expect(source, contains('panel.beginSheetModal(for: self)'));
+    expect(source, contains('if response == .abort'));
+    expect(source, contains('code: "image_picker_unavailable"'));
+  });
+}

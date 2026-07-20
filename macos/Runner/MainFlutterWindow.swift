@@ -218,6 +218,14 @@ class MainFlutterWindow: NSWindow {
       self.makeKeyAndOrderFront(nil)
       panel.beginSheetModal(for: self) { [weak self] response in
         defer { self?.imageImportPanel = nil }
+        if response == .abort {
+          result(
+            FlutterError(
+              code: "image_picker_unavailable",
+              message: "Unable to display the image picker.",
+              details: nil))
+          return
+        }
         guard response == .OK, let url = panel.url else {
           result(nil)
           return
