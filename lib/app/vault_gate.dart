@@ -8,6 +8,7 @@ import '../features/accounts/accounts_page.dart';
 import '../features/onboarding/create_vault_page.dart';
 import '../features/unlock/unlock_page.dart';
 import 'state/providers.dart';
+import 'widgets/vault_security_shell.dart';
 
 /// Replaces the complete navigation surface when the Vault locks or unlocks.
 class VaultGate extends ConsumerStatefulWidget {
@@ -150,7 +151,41 @@ class _LoadingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: colors.primaryContainer,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(
+                Icons.shield_rounded,
+                size: 29,
+                color: colors.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '正在打开本地保险库…',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -162,29 +197,23 @@ class _StartupErrorPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: 56,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('重试'),
-              ),
-            ],
+    return VaultSecurityShell(
+      icon: Icons.error_outline_rounded,
+      title: '无法打开 TOTP Vault',
+      description: '本地数据没有被重置，可以安全重试。',
+      child: Column(
+        children: [
+          VaultInlineMessage(message: message),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('重试'),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

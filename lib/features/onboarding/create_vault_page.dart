@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/state/providers.dart';
+import '../../app/widgets/vault_security_shell.dart';
 
 /// First-run screen for creating the encrypted local Vault.
 class CreateVaultPage extends ConsumerStatefulWidget {
@@ -26,7 +27,7 @@ class _CreateVaultPageState extends ConsumerState<CreateVaultPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(vaultSessionProvider);
-    return _SecurityPageShell(
+    return VaultSecurityShell(
       icon: Icons.shield_outlined,
       title: '创建本地保险库',
       description: '所有账号 Secret 都会使用主密码加密后保存在当前设备。主密码不会上传，也无法找回。',
@@ -67,7 +68,7 @@ class _CreateVaultPageState extends ConsumerState<CreateVaultPage> {
           ),
           if (state.message != null) ...[
             const SizedBox(height: 14),
-            _InlineError(message: state.message!),
+            VaultInlineMessage(message: state.message!),
           ],
           const SizedBox(height: 24),
           SizedBox(
@@ -92,93 +93,5 @@ class _CreateVaultPageState extends ConsumerState<CreateVaultPage> {
     await ref
         .read(vaultSessionProvider.notifier)
         .createVault(_passwordController.text, _confirmationController.text);
-  }
-}
-
-class _SecurityPageShell extends StatelessWidget {
-  const _SecurityPageShell({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.child,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: Card(
-              color: colors.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: BorderSide(color: colors.outlineVariant),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        color: colors.primaryContainer,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Icon(icon, size: 32, color: colors.primary),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      description,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    child,
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _InlineError extends StatelessWidget {
-  const _InlineError({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.errorContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(message, style: TextStyle(color: colors.onErrorContainer)),
-    );
   }
 }

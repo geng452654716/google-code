@@ -35,7 +35,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byType(FloatingActionButton));
+    await tester.tap(find.byKey(const ValueKey('add-account-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('从二维码图片导入'));
     await tester.pump();
@@ -74,7 +74,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byType(FloatingActionButton));
+    await tester.tap(find.byKey(const ValueKey('add-account-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('从二维码图片导入'));
 

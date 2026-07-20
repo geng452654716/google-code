@@ -19,7 +19,7 @@ void main() {
     final clipboard = _MemoryClipboardReader(const ClipboardTextData(uri));
     await _pumpAccountsPage(tester, repository, clipboard);
 
-    await tester.tap(find.byType(FloatingActionButton));
+    await tester.tap(find.byKey(const ValueKey('add-account-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('从剪贴板导入'));
     await _pumpUntilFound(tester, find.text('确认导入账号'));

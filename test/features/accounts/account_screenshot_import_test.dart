@@ -126,7 +126,7 @@ void main() {
 
 /// Opens the add-account menu and selects the screenshot import action.
 Future<void> _chooseScreenshot(WidgetTester tester) async {
-  await tester.tap(find.byType(FloatingActionButton));
+  await tester.tap(find.byKey(const ValueKey('add-account-button')));
   await tester.pumpAndSettle();
   await tester.tap(find.text('扫描屏幕二维码'));
 }

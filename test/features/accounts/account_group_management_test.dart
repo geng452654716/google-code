@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_code/app/state/providers.dart';
+import 'package:google_code/app/theme/totp_vault_theme.dart';
 import 'package:google_code/core/errors/vault_exception.dart';
 import 'package:google_code/domain/entities/entities.dart';
 import 'package:google_code/domain/repositories/vault_repository.dart';
@@ -66,6 +67,57 @@ void main() {
     );
     expect(repository.storedPayload.accounts.single.groupId, isNull);
     expect(find.text('已移到未分组'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('shows the unified add-account panel and semantic account menu', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final repository = _GroupVaultRepository(_initialPayload());
+    final container = ProviderContainer(
+      overrides: [vaultRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(vaultSessionProvider.notifier);
+    await controller.initialize();
+    await controller.unlock('password123');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: TotpVaultTheme.light(),
+          home: AccountsPage(onToggleTheme: () {}),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('add-account-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('添加验证码账号'), findsOneWidget);
+    expect(find.text('手动输入或链接'), findsOneWidget);
+    expect(find.text('摄像头扫描'), findsOneWidget);
+    expect(find.text('从二维码图片导入'), findsOneWidget);
+    expect(find.text('扫描屏幕二维码'), findsOneWidget);
+    expect(find.text('从剪贴板导入'), findsOneWidget);
+    expect(find.textContaining('不会上传到服务器'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('account-actions-account-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('编辑账号'), findsOneWidget);
+    expect(find.text('分享账号'), findsOneWidget);
+    expect(find.text('删除账号'), findsOneWidget);
+    final deleteText = tester.widget<Text>(find.text('删除账号'));
+    expect(deleteText.style?.color, TotpVaultTheme.light().colorScheme.error);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

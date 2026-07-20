@@ -59,7 +59,7 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.byType(FloatingActionButton));
+      await tester.tap(find.byKey(const ValueKey('add-account-button')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('从二维码图片导入'));
       await _pumpUntilFound(tester, find.textContaining('已读取 1/2 张'));
