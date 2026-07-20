@@ -79,6 +79,54 @@ void main() {
     );
   });
 
+  test('imports a QR with a matching issuer-only label', () async {
+    const compatibleUri =
+        'otpauth://totp/Example%20Service:?secret=JBSWY3DPEHPK3PXP&issuer=%20Example%20Service%20';
+    final png = QrCodeService().encodePng(compatibleUri);
+
+    final candidate = await const OtpImportService().fromImageBytes(png);
+
+    expect(candidate.draft.issuer, 'Example Service');
+    expect(candidate.draft.accountName, 'Example Service');
+    expect(candidate.draft.secret, 'JBSWY3DPEHPK3PXP');
+  });
+
+  test('reports a specific error for conflicting issuer metadata', () {
+    const service = OtpImportService();
+
+    expect(
+      () => service.fromQrText(
+        'otpauth://totp/Example:user?secret=JBSWY3DPEHPK3PXP&issuer=Other',
+        source: OtpImportSource.imageFile,
+      ),
+      throwsA(
+        isA<OtpImportException>().having(
+          (error) => error.message,
+          'message',
+          contains('发行方信息互相冲突'),
+        ),
+      ),
+    );
+  });
+
+  test('reports a specific error for an invalid TOTP secret', () {
+    const service = OtpImportService();
+
+    expect(
+      () => service.fromQrText(
+        'otpauth://totp/Example:user?secret=INVALID1&issuer=Example',
+        source: OtpImportSource.imageFile,
+      ),
+      throwsA(
+        isA<OtpImportException>().having(
+          (error) => error.message,
+          'message',
+          contains('密钥为空或格式无效'),
+        ),
+      ),
+    );
+  });
+
   test('parses clipboard text with a clipboard-specific source', () {
     const service = OtpImportService();
 

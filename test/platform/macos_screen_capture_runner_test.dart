@@ -16,4 +16,15 @@ void main() {
     expect(source, contains('deminiaturize(nil)'));
     expect(source, isNot(contains('orderOut(nil)')));
   });
+
+  test('macOS runner can relaunch after screen-recording authorization', () {
+    final source = File(
+      'macos/Runner/MainFlutterWindow.swift',
+    ).readAsStringSync();
+
+    expect(source, contains('case "restartApplication"'));
+    expect(source, contains('private func restartApplication'));
+    expect(source, contains('/usr/bin/open -n'));
+    expect(source, contains('NSApp.terminate(nil)'));
+  });
 }

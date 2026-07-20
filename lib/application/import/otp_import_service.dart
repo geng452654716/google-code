@@ -127,14 +127,33 @@ class OtpImportService {
           source: source,
         ),
       );
-    } on FormatException {
+    } on FormatException catch (error) {
       final inputLabel = source == OtpImportSource.clipboardText
           ? '剪贴板内容'
           : '二维码';
-      throw OtpImportException(
-        '$inputLabel不是受支持的 TOTP 账号。当前支持标准 otpauth://totp 链接和 Google Authenticator 迁移二维码。',
-      );
+      throw OtpImportException(_totpFormatErrorMessage(error, inputLabel));
     }
+  }
+
+  String _totpFormatErrorMessage(FormatException error, String inputLabel) {
+    final detail = error.message.toString();
+    if (detail.contains('account name is missing') ||
+        detail.contains('account label is missing')) {
+      return '$inputLabel中的账号名称为空，无法导入。';
+    }
+    if (detail.contains('Issuer in label and query must match')) {
+      return '$inputLabel中的发行方信息互相冲突，请重新生成二维码。';
+    }
+    if (detail.contains('Base32 secret')) {
+      return '$inputLabel中的 TOTP 密钥为空或格式无效。';
+    }
+    if (detail.contains('algorithm') ||
+        detail.contains('digit count') ||
+        detail.contains('period') ||
+        detail.contains('Expected an integer')) {
+      return '$inputLabel包含当前不支持的 TOTP 参数。';
+    }
+    return '$inputLabel不是受支持的 TOTP 账号。当前支持标准 otpauth://totp 链接和 Google Authenticator 迁移二维码。';
   }
 
   /// Parses one standard TOTP QR text without retaining its raw URI.

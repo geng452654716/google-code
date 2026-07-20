@@ -21,6 +21,8 @@ import '../backup/backup_export_dialog.dart';
 import '../backup/backup_restore_dialog.dart';
 import '../security/security_settings_dialog.dart';
 
+enum _ScreenCapturePermissionAction { cancel, openSettings, restart }
+
 /// Main unlocked account list backed by the encrypted local Vault.
 class AccountsPage extends ConsumerStatefulWidget {
   const AccountsPage({required this.onToggleTheme, super.key});
@@ -389,28 +391,50 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
     return confirmed ?? false;
   }
 
-  /// Explains macOS permission requirements and optionally opens System Settings.
+  /// Distinguishes missing permission from a grant that needs an app restart.
   Future<void> _showScreenCapturePermissionDialog(String message) async {
-    final openSettings = await showDialog<bool>(
+    final action = await showDialog<_ScreenCapturePermissionAction>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('需要屏幕录制权限'),
-        content: Text(message),
+        title: const Text('屏幕录制权限尚未生效'),
+        content: Text(
+          '$message\n\n'
+          '首次授权或安装新版本后，macOS 可能需要彻底重启应用才能让权限生效。',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(_ScreenCapturePermissionAction.cancel),
             child: const Text('取消'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+          TextButton(
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(_ScreenCapturePermissionAction.openSettings),
             child: const Text('打开系统设置'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(_ScreenCapturePermissionAction.restart),
+            child: const Text('退出并重新打开'),
           ),
         ],
       ),
     );
-    if (openSettings != true || !mounted) return;
+    if (!mounted) return;
     try {
-      await ref.read(screenCaptureServiceProvider).openPermissionSettings();
+      switch (action) {
+        case _ScreenCapturePermissionAction.openSettings:
+          await ref.read(screenCaptureServiceProvider).openPermissionSettings();
+          return;
+        case _ScreenCapturePermissionAction.restart:
+          await ref.read(screenCaptureServiceProvider).restartApplication();
+          return;
+        case _ScreenCapturePermissionAction.cancel || null:
+          return;
+      }
     } on ScreenCaptureException catch (error) {
       if (mounted) _showMessage(error.message);
     }

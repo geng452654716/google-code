@@ -21,6 +21,9 @@ abstract interface class ScreenCaptureService {
 
   /// Opens the operating system screen-recording permission settings page.
   Future<void> openPermissionSettings();
+
+  /// Fully exits and reopens the installed desktop application.
+  Future<void> restartApplication();
 }
 
 /// Method-channel implementation backed by the desktop runner.
@@ -63,11 +66,28 @@ class PlatformScreenCaptureService implements ScreenCaptureService {
     }
   }
 
+  @override
+  Future<void> restartApplication() async {
+    try {
+      await channel.invokeMethod<void>('restartApplication');
+    } on MissingPluginException {
+      throw const ScreenCaptureException(
+        ScreenCaptureFailureKind.unavailable,
+        '无法自动重新打开应用，请手动完全退出 Google Code 后再次打开。',
+      );
+    } on PlatformException {
+      throw const ScreenCaptureException(
+        ScreenCaptureFailureKind.failed,
+        '无法自动重新打开应用，请手动完全退出 Google Code 后再次打开。',
+      );
+    }
+  }
+
   ScreenCaptureException _mapPlatformError(PlatformException error) {
     return switch (error.code) {
       'permission_denied' => const ScreenCaptureException(
         ScreenCaptureFailureKind.permissionDenied,
-        '需要屏幕录制权限才能框选并识别二维码。授权后可能需要重新打开应用。',
+        '当前进程尚未获得屏幕录制权限。若系统设置中的 Google Code 已经开启，请完全退出并重新打开应用；否则请先开启权限。',
       ),
       'unavailable' || 'unsupported' => const ScreenCaptureException(
         ScreenCaptureFailureKind.unavailable,

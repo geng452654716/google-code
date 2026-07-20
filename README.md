@@ -4,18 +4,18 @@
 
 ## 当前状态
 
-项目已完成阶段 1 至阶段 16 的主要开发闭环：本地加密 Vault、账号 CRUD、TOTP、多入口二维码导入、Google Authenticator 迁移二维码批量导入、单账号安全分享、独立 `.gcbak` 加密备份恢复、设备快速解锁、系统事件自动锁定、macOS/Windows 原生系统分享、跨平台 GitHub Actions、摄像头二维码扫描 PoC、依赖供应链审计、个人安装/升级/卸载工具，以及 macOS DMG / Windows Setup EXE 个人安装包。
+项目已完成阶段 1 至阶段 17 的主要开发闭环：本地加密 Vault、账号 CRUD、TOTP、多入口二维码导入、Google Authenticator 迁移二维码批量导入、单账号安全分享、独立 `.gcbak` 加密备份恢复、设备快速解锁、系统事件自动锁定、macOS/Windows 原生系统分享、跨平台 GitHub Actions、摄像头二维码扫描 PoC、依赖供应链审计、个人安装/升级/卸载工具、macOS DMG / Windows Setup EXE 个人安装包，以及 macOS 屏幕录制授权恢复流程。
 
 本项目明确为**个人自用软件**，不计划公开发布、上架应用商店或创建公开 GitHub Release。阶段 15 提供无需管理员权限的用户级安装脚本；阶段 16 在此基础上提供可双击使用的 DMG 和 Setup EXE。安装、升级和卸载默认只处理应用及安装器管理的快捷方式，不删除 Vault、系统安全存储记录或 `.gcbak` 备份。
 
-macOS 构建只有 ad hoc 签名，Windows 构建没有 Authenticode 签名；安装脚本和安装包不会移除 `com.apple.quarantine`、绕过 Gatekeeper/SmartScreen，也不等同于可信发布签名。摄像头与其他 Windows 原生能力仍待目标真机人工验收。最新验证结果和 CI 运行见 `docs/PHASE16_STATUS.md`。
+macOS 构建默认只有 ad hoc 签名，Windows 构建没有 Authenticode 签名；安装脚本和安装包不会移除 `com.apple.quarantine`、绕过 Gatekeeper/SmartScreen，也不等同于可信发布签名。macOS 脚本支持显式指定本机稳定代码签名 identity，以减少升级后 TCC 权限失配；摄像头与其他 Windows 原生能力仍待目标真机人工验收。最新验证结果见 `docs/PHASE17_STATUS.md`。
 
 详细进度见：
 
 - `docs/PRD.md`
 - `docs/TECHNICAL_DESIGN.md`
 - `docs/PHASE0_STATUS.md`
-- `docs/PHASE1_STATUS.md` 至 `docs/PHASE16_STATUS.md`
+- `docs/PHASE1_STATUS.md` 至 `docs/PHASE17_STATUS.md`
 - `docs/adr/0001-foundation-stack.md`
 
 ## 环境
@@ -49,6 +49,10 @@ bash tool/package_macos_dmg.sh
 
 # 已有 Release .app 时跳过构建
 bash tool/package_macos_dmg.sh --skip-build
+
+# 本机 Keychain 已有 Apple Development 等稳定代码签名 identity 时使用
+GOOGLE_CODE_CODESIGN_IDENTITY='Apple Development: 你的名字 (TEAMID)' \
+  bash tool/package_macos_dmg.sh
 ```
 
 打开 DMG 后，把 `Google Code.app` 拖到其中的 `Applications` 快捷方式即可。也可以继续使用下方用户级安装脚本安装到 `~/Applications`。
@@ -77,6 +81,10 @@ bash tool/install_macos.sh --skip-build
 # 安装后主动启动
 bash tool/install_macos.sh --skip-build --launch
 
+# 使用稳定本机签名安装，帮助 macOS 在后续升级时识别为同一个应用
+GOOGLE_CODE_CODESIGN_IDENTITY='Apple Development: 你的名字 (TEAMID)' \
+  bash tool/install_macos.sh --skip-build --launch
+
 # 只卸载应用，保留 Vault、Keychain 记录和备份
 bash tool/install_macos.sh --uninstall
 ```
@@ -102,13 +110,16 @@ bash tool/install_macos.sh --uninstall
 
 选择“扫描屏幕二维码”后，应用会先说明系统截图流程。开始框选时应用窗口会暂时离开屏幕，鼠标变为系统区域截图的十字光标；拖动框选二维码即可，按 `Esc` 取消。macOS 会最小化而不是直接隐藏唯一窗口，并在成功、取消或异常后恢复并激活窗口。
 
-## 阶段 16 验证摘要
+如果系统设置里已经开启 `Google Code` 的“录屏与系统录音”，应用仍提示权限尚未生效，请点击弹窗中的“退出并重新打开”。首次授权后当前进程可能必须彻底重启；默认 ad hoc 签名的应用在重新构建后身份也会变化，因此升级后可能需要再次确认权限。若本机 Keychain 已有稳定的代码签名 identity，可通过上述环境变量或 `--codesign-identity` 参数打包/安装。
 
-- 最终 Desktop CI：`29575452467`，格式、静态分析、122 tests、macOS/Windows Debug 构建全部通过。
-- 最终 Personal Install Readiness：`29575859931`，DMG 构建/校验/上传以及 Windows Setup EXE 编译、安装、覆盖升级、卸载和上传全部通过。
-- macOS DMG：`GoogleCode-1.0.0-build1-macos-universal.dmg`，最终 CI Artifact SHA-256 为 `fa598464ebe200f60551be0dbba76cdec5226de7f594ea962510efd912b4ae9b`。
-- Windows Setup EXE：`GoogleCode-1.0.0-build1-windows-x64-setup.exe`，SHA-256 为 `dbb9c22504d892ab32fcc1b273d8666d3a221a3a4d71a3d937dfc250b9c9930f`。
-- 完整根因、测试和人工验收项见 `docs/PHASE16_STATUS.md`。
+## 阶段 17 验证摘要
+
+- 权限失败弹窗同时提供“打开系统设置”和“退出并重新打开”，不再把已开启但尚未对当前进程生效的状态误报为单纯未授权。
+- macOS runner 通过同一 MethodChannel 启动延迟 relauncher，再正常终止当前进程。
+- macOS DMG/安装脚本支持可选稳定签名，同时保留原 entitlements、identifier 和安全边界。
+- 标准 TOTP 二维码兼容“标签只有发行方、冒号后账号名为空”的生成器输出；仅当 label issuer 与 query issuer 同时存在且一致时，才回退使用发行方作为显示账号名。
+- TOTP URI 字段错误会区分账号为空、发行方冲突、Secret 无效和参数不支持，避免统一误报为“不支持的二维码”。
+- 完整根因、测试和人工验收项见 `docs/PHASE17_STATUS.md`。
 
 ## 目录
 

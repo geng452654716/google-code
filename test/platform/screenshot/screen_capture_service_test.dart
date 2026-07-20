@@ -95,4 +95,19 @@ void main() {
 
     expect(opened, isTrue);
   });
+
+  test('requests a full native application restart', () async {
+    var restarted = false;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'restartApplication');
+      restarted = true;
+      return null;
+    });
+
+    await const PlatformScreenCaptureService(
+      channel: channel,
+    ).restartApplication();
+
+    expect(restarted, isTrue);
+  });
 }

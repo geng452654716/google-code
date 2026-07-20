@@ -87,14 +87,40 @@ void main() {
 
     await _chooseScreenshot(tester);
     await _startScreenshotSelection(tester);
-    await _pumpUntilFound(tester, find.text('需要屏幕录制权限'));
+    await _pumpUntilFound(tester, find.text('屏幕录制权限尚未生效'));
 
+    expect(find.text('退出并重新打开'), findsOneWidget);
     expect(find.text('打开系统设置'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '打开系统设置'));
+    await tester.tap(find.widgetWithText(TextButton, '打开系统设置'));
     await tester.pumpAndSettle();
 
     expect(capture.openSettingsCount, 1);
     expect(find.text('正在解析…'), findsNothing);
+  });
+
+  testWidgets('permission denial can restart after permission is enabled', (
+    tester,
+  ) async {
+    final repository = _UnlockedRepository();
+    final capture = _FakeScreenCaptureService(
+      null,
+      failure: const ScreenCaptureException(
+        ScreenCaptureFailureKind.permissionDenied,
+        '当前进程尚未获得屏幕录制权限。',
+      ),
+    );
+    await _pumpAccountsPage(tester, repository, capture);
+
+    await _chooseScreenshot(tester);
+    await _startScreenshotSelection(tester);
+    await _pumpUntilFound(tester, find.text('屏幕录制权限尚未生效'));
+
+    expect(find.textContaining('彻底重启应用'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '退出并重新打开'));
+    await tester.pumpAndSettle();
+
+    expect(capture.restartCount, 1);
+    expect(capture.openSettingsCount, 0);
   });
 }
 
@@ -174,6 +200,7 @@ class _FakeScreenCaptureService implements ScreenCaptureService {
   final ScreenCaptureException? failure;
   int captureCount = 0;
   int openSettingsCount = 0;
+  int restartCount = 0;
 
   @override
   Future<Uint8List?> captureRegion() async {
@@ -185,6 +212,11 @@ class _FakeScreenCaptureService implements ScreenCaptureService {
   @override
   Future<void> openPermissionSettings() async {
     openSettingsCount += 1;
+  }
+
+  @override
+  Future<void> restartApplication() async {
+    restartCount += 1;
   }
 }
 

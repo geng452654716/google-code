@@ -27,12 +27,6 @@ class OtpAuthUriCodec {
     final labelIssuer = separator < 0
         ? null
         : label.substring(0, separator).trim();
-    final accountName = (separator < 0 ? label : label.substring(separator + 1))
-        .trim();
-    if (accountName.isEmpty) {
-      throw const FormatException('TOTP account name is missing.');
-    }
-
     final queryIssuer = uri.queryParameters['issuer']?.trim();
     if (labelIssuer != null &&
         labelIssuer.isNotEmpty &&
@@ -46,6 +40,26 @@ class OtpAuthUriCodec {
         : (labelIssuer?.isNotEmpty ?? false)
         ? labelIssuer
         : null;
+
+    final parsedAccountName =
+        (separator < 0 ? label : label.substring(separator + 1)).trim();
+    // Some providers generate `Issuer:` as the label and repeat the same
+    // issuer in the query without supplying a separate account name. Keep the
+    // compatibility narrow: only use the issuer as the display account when
+    // both issuer fields are present and already proved to match.
+    final canUseIssuerAsAccountName =
+        separator >= 0 &&
+        parsedAccountName.isEmpty &&
+        labelIssuer != null &&
+        labelIssuer.isNotEmpty &&
+        queryIssuer != null &&
+        queryIssuer.isNotEmpty;
+    final accountName = canUseIssuerAsAccountName
+        ? queryIssuer
+        : parsedAccountName;
+    if (accountName.isEmpty) {
+      throw const FormatException('TOTP account name is missing.');
+    }
 
     final secret = _base32Codec.normalize(uri.queryParameters['secret'] ?? '');
     final digits = _parseInt(uri.queryParameters['digits'], fallback: 6);

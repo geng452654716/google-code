@@ -20,6 +20,12 @@ void main() {
 
       expect(macScript, contains('hdiutil create'));
       expect(macScript, contains('hdiutil verify'));
+      expect(macScript, contains('--codesign-identity'));
+      expect(macScript, contains('GOOGLE_CODE_CODESIGN_IDENTITY'));
+      expect(
+        macScript,
+        contains('--preserve-metadata=identifier,entitlements'),
+      );
       expect(macScript, contains('codesign --verify --deep --strict'));
       expect(macScript, contains('ln -s /Applications'));
       expect(macScript, isNot(contains('xattr -d')));

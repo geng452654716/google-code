@@ -13,6 +13,9 @@ void main() {
 
     expect(macSource, contains('--dry-run'));
     expect(macSource, contains('--uninstall'));
+    expect(macSource, contains('--codesign-identity'));
+    expect(macSource, contains('GOOGLE_CODE_CODESIGN_IDENTITY'));
+    expect(macSource, contains('--preserve-metadata=identifier,entitlements'));
     expect(macSource, contains('codesign --verify --deep --strict'));
     expect(macSource, isNot(contains('xattr -d')));
     expect(macSource, contains('never removes com.apple.quarantine'));

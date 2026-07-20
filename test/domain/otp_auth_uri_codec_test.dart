@@ -16,6 +16,31 @@ void main() {
     expect(config.period, 30);
   });
 
+  test('accepts matching issuer-only labels from compatible generators', () {
+    final config = codec.parse(
+      'otpauth://totp/Example%20Service:?secret=JBSWY3DPEHPK3PXP&issuer=%20Example%20Service%20',
+    );
+
+    expect(config.issuer, 'Example Service');
+    expect(config.accountName, 'Example Service');
+    expect(config.secret, 'JBSWY3DPEHPK3PXP');
+  });
+
+  test('still rejects empty accounts without two matching issuer fields', () {
+    expect(
+      () => codec.parse(
+        'otpauth://totp/Example%20Service:?secret=JBSWY3DPEHPK3PXP',
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => codec.parse(
+        'otpauth://totp/Example%20Service:?secret=JBSWY3DPEHPK3PXP&issuer=Other',
+      ),
+      throwsFormatException,
+    );
+  });
+
   test('round-trips non-default configuration', () {
     const original = TotpConfig(
       secret: 'JBSWY3DPEHPK3PXP',

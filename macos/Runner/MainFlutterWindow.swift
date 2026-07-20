@@ -350,6 +350,8 @@ class MainFlutterWindow: NSWindow {
         self.captureRegion(result: result)
       case "openScreenRecordingSettings":
         self.openScreenRecordingSettings(result: result)
+      case "restartApplication":
+        self.restartApplication(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -462,6 +464,33 @@ class MainFlutterWindow: NSWindow {
       return
     }
     result(nil)
+  }
+
+  /// Restarts the same installed bundle so a newly granted TCC permission is reloaded.
+  private func restartApplication(result: @escaping FlutterResult) {
+    let applicationURL = Bundle.main.bundleURL
+    let relauncher = Process()
+    relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
+    relauncher.arguments = [
+      "-c",
+      "sleep 1; /usr/bin/open -n \"$1\"",
+      "google-code-relauncher",
+      applicationURL.path,
+    ]
+
+    do {
+      try relauncher.run()
+    } catch {
+      result(
+        FlutterError(
+          code: "restart_failed", message: "Unable to restart application.", details: nil))
+      return
+    }
+
+    result(nil)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      NSApp.terminate(nil)
+    }
   }
 
   /// Reads PNG/TIFF image data currently stored on the system pasteboard.

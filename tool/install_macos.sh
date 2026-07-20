@@ -16,6 +16,7 @@ skip_build=false
 launch_after_install=false
 uninstall=false
 dry_run=false
+codesign_identity="${GOOGLE_CODE_CODESIGN_IDENTITY:-}"
 
 usage() {
   cat <<'USAGE'
@@ -28,13 +29,17 @@ Options:
   --source PATH       Source .app bundle. Defaults to the local Release build.
   --destination PATH  Install path. Defaults to ~/Applications/Google Code.app.
   --skip-build        Do not run a Flutter Release build before installation.
+  --codesign-identity NAME
+                      Re-sign with a stable local identity before installation.
+                      Defaults to GOOGLE_CODE_CODESIGN_IDENTITY when set.
   --launch            Launch the installed app after a successful install.
   --uninstall         Remove the installed app. Vault and backup data are kept.
   --dry-run           Validate and print the plan without changing files.
   -h, --help          Show this help.
 
 Security notes:
-  The local build has only an ad hoc signature unless you sign it separately.
+  Without a stable identity the local build remains ad hoc signed, so macOS may
+  require privacy permission again after an upgrade.
   This script never removes com.apple.quarantine and never bypasses Gatekeeper.
 USAGE
 }
@@ -71,6 +76,11 @@ while [[ $# -gt 0 ]]; do
     --skip-build)
       skip_build=true
       shift
+      ;;
+    --codesign-identity)
+      require_value "$1" "${2:-}"
+      codesign_identity="$2"
+      shift 2
       ;;
     --launch)
       launch_after_install=true
@@ -150,7 +160,13 @@ fi
 log "Source: $source_app"
 log "Destination: $destination_app"
 log 'Install scope: current user only; no administrator privileges are requested.'
-log 'Signature expectation: ad hoc/local only; Gatekeeper is not bypassed.'
+if [[ -n "$codesign_identity" ]]; then
+  log "Signature identity: $codesign_identity"
+  log 'A stable identity helps macOS retain screen-recording permission across upgrades.'
+else
+  log 'Signature expectation: ad hoc/local only; privacy permissions may need renewal after upgrades.'
+fi
+log 'Gatekeeper is not bypassed.'
 
 if $dry_run; then
   log 'Dry run complete; no files were changed.'
@@ -194,6 +210,15 @@ ditto "$source_app" "$staging_app"
 
 if [[ ! -x "$staging_app/$APP_EXECUTABLE_RELATIVE" ]]; then
   fail 'Staged application is incomplete.'
+fi
+if [[ -n "$codesign_identity" ]]; then
+  codesign \
+    --force \
+    --deep \
+    --timestamp=none \
+    --preserve-metadata=identifier,entitlements \
+    --sign "$codesign_identity" \
+    "$staging_app"
 fi
 codesign --verify --deep --strict "$staging_app"
 

@@ -8,6 +8,7 @@ SOURCE="$DEFAULT_SOURCE"
 OUTPUT=""
 SKIP_BUILD=false
 DRY_RUN=false
+CODESIGN_IDENTITY="${GOOGLE_CODE_CODESIGN_IDENTITY:-}"
 
 usage() {
   cat <<'USAGE'
@@ -20,6 +21,9 @@ Options:
   --source PATH   Release .app bundle to package.
   --output PATH   Destination .dmg path. Defaults to dist/macos/ with versioned name.
   --skip-build    Reuse an existing Flutter macOS Release build.
+  --codesign-identity NAME
+                  Re-sign the packaged app with a stable local identity.
+                  Defaults to GOOGLE_CODE_CODESIGN_IDENTITY when set.
   --dry-run       Validate inputs and print the intended output without writing files.
   -h, --help      Show this help.
 
@@ -52,6 +56,11 @@ while (($# > 0)); do
     --skip-build)
       SKIP_BUILD=true
       shift
+      ;;
+    --codesign-identity)
+      (($# >= 2)) || fail '--codesign-identity requires a value.'
+      CODESIGN_IDENTITY="$2"
+      shift 2
       ;;
     --dry-run)
       DRY_RUN=true
@@ -114,7 +123,13 @@ codesign --verify --deep --strict "$SOURCE" || fail 'Source application signatur
 log "Source: $SOURCE"
 log "Output: $OUTPUT"
 log 'Contents: Google Code.app plus an Applications shortcut.'
-log 'Signature expectation: ad hoc/local only; Gatekeeper is not bypassed.'
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+  log "Signature identity: $CODESIGN_IDENTITY"
+  log 'A stable identity helps macOS retain screen-recording permission across upgrades.'
+else
+  log 'Signature expectation: ad hoc/local only; privacy permissions may need renewal after upgrades.'
+fi
+log 'Gatekeeper is not bypassed.'
 
 if [[ "$DRY_RUN" == true ]]; then
   log 'Dry run complete; no files were changed.'
@@ -133,6 +148,16 @@ trap cleanup EXIT
 
 # ditto preserves the bundle layout, executable bits, extended attributes, and signature.
 ditto "$SOURCE" "$STAGING_DIRECTORY/Google Code.app"
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+  codesign \
+    --force \
+    --deep \
+    --timestamp=none \
+    --preserve-metadata=identifier,entitlements \
+    --sign "$CODESIGN_IDENTITY" \
+    "$STAGING_DIRECTORY/Google Code.app"
+fi
+codesign --verify --deep --strict "$STAGING_DIRECTORY/Google Code.app"
 ln -s /Applications "$STAGING_DIRECTORY/Applications"
 
 rm -f "$TEMPORARY_DMG"

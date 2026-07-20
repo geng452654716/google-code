@@ -446,7 +446,20 @@ flowchart LR
 - macOS 使用 `NSPasteboard` 读取 PNG/TIFF；Windows 读取 `CF_DIBV5` / `CF_DIB` 并包装为内存 BMP。
 - 不能全局监听用户剪贴板。
 
-### 11.5 区域截图
+### 11.5 TOTP URI 兼容边界
+
+标准导入仍只接受 `otpauth://totp`，并继续拒绝 HOTP、缺失或非法 Base32 Secret、不支持的算法/位数/周期，以及 label issuer 与 query issuer 冲突。
+
+部分第三方生成器会输出 `Issuer:` 形式的 label：冒号前为发行方，冒号后没有独立账号名，同时在 query 中重复同一个 issuer。为兼容这类已确认可用的二维码，`OtpAuthUriCodec` 仅在以下条件全部满足时把规范化后的 query issuer 作为显示账号名：
+
+- label 确实包含冒号；
+- 冒号后的账号名为空；
+- label issuer 与 query issuer 均非空；
+- 两个 issuer 去除首尾空白后完全一致。
+
+缺少任一 issuer 或两个 issuer 冲突时仍拒绝导入，不会泛化为接受任意空账号。导入层不会记录原始 URI、Secret、账号或二维码 payload；面向用户的错误只按账号缺失、issuer 冲突、Secret 无效、参数不支持和未知格式分类。
+
+### 11.6 区域截图
 
 当前实现使用自有 Platform Channel，并统一封装在 `ScreenCaptureService` 后：
 
@@ -455,8 +468,11 @@ flowchart LR
 3. macOS 将唯一窗口 `miniaturize`，等待 250ms 动画完成后再调用 `screencapture -i -s -c -x`；不再用 `orderOut` 直接隐藏窗口，避免正常截图流程被误认为应用闪退。
 4. 截图成功后直接从 `NSPasteboard` 读取 PNG/TIFF 内存数据，不创建应用临时文件。
 5. 通过 pasteboard `changeCount` 识别取消；成功、取消、进程启动失败和解析异常均执行 `deminiaturize`、`makeKeyAndOrderFront` 和 `NSApp.activate` 恢复窗口。
-6. 取消时 Dart UI 显示“窗口已恢复”的非错误提示；权限被拒绝时显示解释，并可打开“隐私与安全性 > 屏幕录制”设置。
-7. 截图字节复用图片限制、QR 识别、统一确认、重复检测和 Vault 保存流程。
+6. 取消时 Dart UI 显示“窗口已恢复”的非错误提示；权限检测失败时不再断言用户一定没有授权，而是说明“当前进程权限尚未生效”，同时提供“打开系统设置”和“退出并重新打开”。
+7. `restartApplication` 由 macOS runner 启动一个只负责延迟打开当前 `Bundle.main.bundleURL` 的 relauncher，MethodChannel 返回成功后正常终止当前进程，使首次授权后的 TCC 状态能被新进程重新加载。
+8. 截图字节复用图片限制、QR 识别、统一确认、重复检测和 Vault 保存流程。
+
+TCC 按应用代码签名身份保存屏幕录制授权。默认 Flutter 个人构建为 ad hoc 签名，重新构建后 CodeDirectory hash 会变化，即使系统设置仍显示同名 `Google Code` 为开启，新二进制也可能不匹配旧授权。`tool/package_macos_dmg.sh` 与 `tool/install_macos.sh` 因此支持 `GOOGLE_CODE_CODESIGN_IDENTITY` / `--codesign-identity`：若本机已有 Apple Development 等稳定 identity，则在 staging app 上重新签名，并保留 identifier 和 entitlements。脚本不会自动创建或信任证书，也不会修改 TCC 数据库或绕过系统隐私机制。
 
 Windows 使用自有 GDI 区域选择器，不依赖 Snipping Tool URI：
 
@@ -468,7 +484,7 @@ Windows 使用自有 GDI 区域选择器，不依赖 Snipping Tool URI：
 
 不能把已废弃的旧版 Snipping Tool URI 作为正式方案。macOS App Sandbox、TCC 首次授权和多显示器交互同样必须在发布形态人工验收。
 
-### 11.6 摄像头扫描
+### 11.7 摄像头扫描
 
 阶段 13 已完成 macOS/Windows 摄像头二维码扫描 PoC。当前固定依赖为：
 
@@ -1073,6 +1089,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 - 百分号编码和 Unicode label。
 - issuer 位于 label、query 或两者。
 - issuer 冲突。
+- `Issuer:` 空账号兼容仅在 label/query issuer 同时存在且一致时生效。
 - 缺少 Secret。
 - HOTP 和未知算法。
 - 大小写 Base32、空格和 padding。
@@ -1190,9 +1207,9 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 
 ### 24.3 个人安装模型
 
-- `tool/install_macos.sh` 默认从本地 Release `.app` 安装到 `~/Applications/Google Code.app`；使用 `ditto` 保留 bundle 内容，并用 `codesign --verify --deep --strict` 验证复制后的 bundle 完整性。
+- `tool/install_macos.sh` 默认从本地 Release `.app` 安装到 `~/Applications/Google Code.app`；使用 `ditto` 保留 bundle 内容，并用 `codesign --verify --deep --strict` 验证复制后的 bundle 完整性。可通过 `GOOGLE_CODE_CODESIGN_IDENTITY` 或 `--codesign-identity` 在 staging app 上应用稳定本机签名，减少升级后的 TCC 权限身份变化。
 - `tool/install_windows.ps1` 默认从本地 Windows Release 运行目录安装到 `%LOCALAPPDATA%\Programs\Google Code`，并通过 `WScript.Shell` 为当前用户创建开始菜单快捷方式。
-- `tool/package_macos_dmg.sh` 使用 `ditto` 把现有 Release `.app` 放入临时 staging，加入指向 `/Applications` 的符号链接，再通过 `hdiutil create -format UDZO` 生成压缩 DMG；生成后执行 `hdiutil verify` 和 SHA-256。
+- `tool/package_macos_dmg.sh` 使用 `ditto` 把现有 Release `.app` 放入临时 staging；指定稳定签名 identity 时先在 staging app 上重新签名，再加入指向 `/Applications` 的符号链接并通过 `hdiutil create -format UDZO` 生成压缩 DMG；生成后执行 `codesign --verify`、`hdiutil verify` 和 SHA-256。
 - `tool/package_windows_exe.ps1` 解析 `pubspec.yaml` 版本、定位 Inno Setup 6 的 `ISCC.exe`，并编译 `windows/installer/google_code.iss`。Setup EXE 使用 `PrivilegesRequired=lowest` 安装到当前用户目录，创建当前用户开始菜单入口，并支持 Inno Setup 原生覆盖升级和卸载。
 - 阶段 15 的两个直接安装脚本均先复制到同级 staging，验证后把旧版本移动为 backup，再原子提升新目录；失败时恢复旧版本，成功后清理 transaction 目录。
 - 安装和卸载前检查 `google_code` 进程，避免覆盖正在运行的二进制和插件文件。
