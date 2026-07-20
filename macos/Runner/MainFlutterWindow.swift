@@ -145,6 +145,16 @@ class MainFlutterWindow: NSWindow {
       messenger: sessionRegistrar.messenger)
 
     super.awakeFromNib()
+
+    // PRODUCT_NAME remains `google_code` for data and executable compatibility,
+    // while every user-visible surface uses the current display name.
+    if let displayName = Bundle.main.object(
+      forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+      !displayName.isEmpty
+    {
+      title = displayName
+      miniwindowTitle = displayName
+    }
   }
 
   /// Uses an app-activated native panel so the image chooser cannot open behind Flutter.
@@ -583,28 +593,29 @@ class MainFlutterWindow: NSWindow {
 
   /// Restarts the same installed bundle so a newly granted TCC permission is reloaded.
   private func restartApplication(result: @escaping FlutterResult) {
-    let applicationURL = Bundle.main.bundleURL
-    let relauncher = Process()
-    relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
-    relauncher.arguments = [
-      "-c",
-      "sleep 1; /usr/bin/open -n \"$1\"",
-      "google-code-relauncher",
-      applicationURL.path,
-    ]
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    configuration.createsNewApplicationInstance = true
 
-    do {
-      try relauncher.run()
-    } catch {
-      result(
-        FlutterError(
-          code: "restart_failed", message: "Unable to restart application.", details: nil))
-      return
-    }
-
-    result(nil)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      NSApp.terminate(nil)
+    // LaunchServices can create the replacement instance directly from a sandboxed
+    // app. The previous shell-based relauncher could be terminated together with
+    // its parent before `/usr/bin/open` had a chance to start the new process.
+    NSWorkspace.shared.openApplication(
+      at: Bundle.main.bundleURL,
+      configuration: configuration
+    ) { _, error in
+      DispatchQueue.main.async {
+        if error != nil {
+          result(
+            FlutterError(
+              code: "restart_failed",
+              message: "Unable to restart application.",
+              details: nil))
+          return
+        }
+        result(nil)
+        NSApp.terminate(nil)
+      }
     }
   }
 

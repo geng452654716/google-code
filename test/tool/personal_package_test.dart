@@ -22,6 +22,8 @@ void main() {
       expect(macScript, contains('hdiutil verify'));
       expect(macScript, contains('--codesign-identity'));
       expect(macScript, contains('GOOGLE_CODE_CODESIGN_IDENTITY'));
+      expect(macScript, contains('TOTP Vault Local Signing'));
+      expect(macScript, contains('security find-identity'));
       expect(
         macScript,
         contains('--preserve-metadata=identifier,entitlements'),

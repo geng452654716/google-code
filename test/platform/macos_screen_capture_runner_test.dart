@@ -24,7 +24,19 @@ void main() {
 
     expect(source, contains('case "restartApplication"'));
     expect(source, contains('private func restartApplication'));
-    expect(source, contains('/usr/bin/open -n'));
+    expect(source, contains('NSWorkspace.OpenConfiguration()'));
+    expect(source, contains('createsNewApplicationInstance = true'));
     expect(source, contains('NSApp.terminate(nil)'));
+    expect(source, isNot(contains('google-code-relauncher')));
+    expect(source, isNot(contains('/usr/bin/open -n')));
+  });
+
+  test('macOS window uses the TOTP Vault display name', () {
+    final source = File(
+      'macos/Runner/MainFlutterWindow.swift',
+    ).readAsStringSync();
+
+    expect(source, contains('forInfoDictionaryKey: "CFBundleDisplayName"'));
+    expect(source, contains('miniwindowTitle = displayName'));
   });
 }

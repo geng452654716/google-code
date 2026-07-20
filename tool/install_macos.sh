@@ -17,6 +17,12 @@ launch_after_install=false
 uninstall=false
 dry_run=false
 codesign_identity="${TOTP_VAULT_CODESIGN_IDENTITY:-${GOOGLE_CODE_CODESIGN_IDENTITY:-}}"
+LOCAL_SIGNING_IDENTITY="TOTP Vault Local Signing"
+if [[ -z "$codesign_identity" ]] && command -v security >/dev/null 2>&1; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+    codesign_identity="$LOCAL_SIGNING_IDENTITY"
+  fi
+fi
 
 usage() {
   cat <<'USAGE'

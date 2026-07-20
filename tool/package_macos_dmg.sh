@@ -9,6 +9,12 @@ OUTPUT=""
 SKIP_BUILD=false
 DRY_RUN=false
 CODESIGN_IDENTITY="${TOTP_VAULT_CODESIGN_IDENTITY:-${GOOGLE_CODE_CODESIGN_IDENTITY:-}}"
+LOCAL_SIGNING_IDENTITY="TOTP Vault Local Signing"
+if [[ -z "$CODESIGN_IDENTITY" ]] && command -v security >/dev/null 2>&1; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+    CODESIGN_IDENTITY="$LOCAL_SIGNING_IDENTITY"
+  fi
+fi
 
 usage() {
   cat <<'USAGE'

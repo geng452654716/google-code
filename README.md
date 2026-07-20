@@ -50,7 +50,8 @@ bash tool/package_macos_dmg.sh
 # 已有 Release .app 时跳过构建
 bash tool/package_macos_dmg.sh --skip-build
 
-# 本机 Keychain 已有 Apple Development 等稳定代码签名 identity 时使用
+# 脚本会自动使用本机的 “TOTP Vault Local Signing” identity；
+# 也可显式指定 Apple Development 等其他稳定 identity
 TOTP_VAULT_CODESIGN_IDENTITY='Apple Development: 你的名字 (TEAMID)' \
   bash tool/package_macos_dmg.sh
 ```
@@ -81,7 +82,8 @@ bash tool/install_macos.sh --skip-build
 # 安装后主动启动
 bash tool/install_macos.sh --skip-build --launch
 
-# 使用稳定本机签名安装，帮助 macOS 在后续升级时识别为同一个应用
+# 若登录钥匙串存在 “TOTP Vault Local Signing”，脚本会自动使用；
+# 也可显式指定其他稳定 identity
 TOTP_VAULT_CODESIGN_IDENTITY='Apple Development: 你的名字 (TEAMID)' \
   bash tool/install_macos.sh --skip-build --launch
 

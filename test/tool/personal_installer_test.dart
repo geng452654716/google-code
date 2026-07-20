@@ -15,6 +15,8 @@ void main() {
     expect(macSource, contains('--uninstall'));
     expect(macSource, contains('--codesign-identity'));
     expect(macSource, contains('GOOGLE_CODE_CODESIGN_IDENTITY'));
+    expect(macSource, contains('TOTP Vault Local Signing'));
+    expect(macSource, contains('security find-identity'));
     expect(macSource, contains('--preserve-metadata=identifier,entitlements'));
     expect(macSource, contains('--sign -'));
     expect(macSource, contains('codesign --verify --deep --strict'));
