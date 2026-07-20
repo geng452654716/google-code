@@ -7,7 +7,10 @@ import '../../platform/auth/local_authentication_service.dart';
 
 /// Manages device-only quick unlock without changing the master-password root.
 class SecuritySettingsDialog extends ConsumerStatefulWidget {
-  const SecuritySettingsDialog({super.key});
+  const SecuritySettingsDialog({this.isOnboarding = false, super.key});
+
+  /// Uses first-run copy while retaining the same password + device-auth flow.
+  final bool isOnboarding;
 
   @override
   ConsumerState<SecuritySettingsDialog> createState() =>
@@ -42,11 +45,15 @@ class _SecuritySettingsDialogState
     final colors = Theme.of(context).colorScheme;
     final status = _status;
     return AlertDialog(
-      title: const Row(
+      title: Row(
         children: [
-          Icon(Icons.security_rounded),
-          SizedBox(width: 10),
-          Text('安全设置'),
+          Icon(
+            widget.isOnboarding
+                ? Icons.fingerprint_rounded
+                : Icons.security_rounded,
+          ),
+          const SizedBox(width: 10),
+          Text(widget.isOnboarding ? '启用 Touch ID 快速解锁' : '安全设置'),
         ],
       ),
       content: SizedBox(
@@ -61,6 +68,15 @@ class _SecuritySettingsDialogState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (widget.isOnboarding &&
+                        !status.isConfigured &&
+                        status.canEnable) ...[
+                      Text(
+                        '保险库已创建。建议现在启用 ${status.authenticationName}，以后无需每次输入主密码。',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     _StatusCard(status: status),
                     const SizedBox(height: 18),
                     Text(
@@ -112,7 +128,7 @@ class _SecuritySettingsDialogState
       actions: [
         TextButton(
           onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
+          child: Text(widget.isOnboarding ? '稍后' : '关闭'),
         ),
         if (status?.isConfigured == true)
           FilledButton.tonalIcon(

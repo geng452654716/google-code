@@ -451,19 +451,50 @@ class MainFlutterWindow: NSWindow {
     NSApp.activate(ignoringOtherApps: true)
   }
 
-  /// Opens the macOS Privacy & Security screen-recording settings page.
+  /// Opens Screen Recording settings across current and legacy macOS releases.
+  ///
+  /// Apple has used more than one System Settings extension identifier. Try the
+  /// current Privacy & Security extension first, retain the legacy preference
+  /// pane URL for older systems, and finally open System Settings itself so the
+  /// user is never left with a button that appears to do nothing.
   private func openScreenRecordingSettings(result: @escaping FlutterResult) {
-    guard
-      let url = URL(
-        string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"),
-      NSWorkspace.shared.open(url)
-    else {
-      result(
-        FlutterError(
-          code: "settings_failed", message: "Unable to open system settings.", details: nil))
+    let destinations: [(String, String)] = [
+      (
+        "screenRecording",
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"
+      ),
+      (
+        "screenRecordingLegacy",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+      ),
+    ]
+
+    for (destination, rawURL) in destinations {
+      guard let url = URL(string: rawURL) else { continue }
+      if NSWorkspace.shared.open(url) {
+        result(destination)
+        return
+      }
+    }
+
+    if let settingsURL = NSWorkspace.shared.urlForApplication(
+      withBundleIdentifier: "com.apple.systempreferences"
+    ), NSWorkspace.shared.open(settingsURL) {
+      result("systemSettings")
       return
     }
-    result(nil)
+
+    let fallbackURL = URL(fileURLWithPath: "/System/Applications/System Settings.app")
+    if FileManager.default.fileExists(atPath: fallbackURL.path),
+      NSWorkspace.shared.open(fallbackURL)
+    {
+      result("systemSettings")
+      return
+    }
+
+    result(
+      FlutterError(
+        code: "settings_failed", message: "Unable to open system settings.", details: nil))
   }
 
   /// Restarts the same installed bundle so a newly granted TCC permission is reloaded.

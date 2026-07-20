@@ -52,6 +52,9 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
       const Duration(seconds: 1),
       (_) => _refreshCodes(),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_offerQuickUnlockOnboarding());
+    });
   }
 
   @override
@@ -588,7 +591,15 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
     try {
       switch (action) {
         case _ScreenCapturePermissionAction.openSettings:
-          await ref.read(screenCaptureServiceProvider).openPermissionSettings();
+          final destination = await ref
+              .read(screenCaptureServiceProvider)
+              .openPermissionSettings();
+          if (!mounted) return;
+          _showMessage(
+            destination == ScreenCaptureSettingsDestination.screenRecording
+                ? '已打开屏幕录制权限。请开启当前应用，然后点“退出并重新打开”。'
+                : '已打开系统设置。请进入“隐私与安全性”→“屏幕与系统音频录制”，开启当前应用后彻底重启。',
+          );
           return;
         case _ScreenCapturePermissionAction.restart:
           await ref.read(screenCaptureServiceProvider).restartApplication();
@@ -763,6 +774,26 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
     if (code == null) return;
     await ref.read(sensitiveClipboardServiceProvider).writeText(code);
     if (mounted) _showMessage('验证码已复制，60 秒后尝试清理剪贴板');
+  }
+
+  /// Offers quick unlock once for Vaults that have not handled onboarding.
+  Future<void> _offerQuickUnlockOnboarding() async {
+    final session = ref.read(vaultSessionProvider);
+    if (session.payload?.preferences['quickUnlockOnboardingDismissed'] ==
+        true) {
+      return;
+    }
+    final status = await ref.read(quickUnlockServiceProvider).inspect();
+    if (!mounted || status.isConfigured || !status.canEnable) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const SecuritySettingsDialog(isOnboarding: true),
+    );
+    if (!mounted) return;
+    await ref
+        .read(vaultSessionProvider.notifier)
+        .markQuickUnlockOnboardingSeen();
   }
 
   /// Opens device-only quick-unlock and authentication settings.

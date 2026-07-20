@@ -210,8 +210,9 @@ class _FakeScreenCaptureService implements ScreenCaptureService {
   }
 
   @override
-  Future<void> openPermissionSettings() async {
+  Future<ScreenCaptureSettingsDestination> openPermissionSettings() async {
     openSettingsCount += 1;
+    return ScreenCaptureSettingsDestination.screenRecording;
   }
 
   @override

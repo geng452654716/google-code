@@ -148,6 +148,23 @@ class VaultSessionController extends Notifier<VaultSessionState> {
     return attempt.status;
   }
 
+  /// Persists that the one-time quick-unlock onboarding has been handled.
+  Future<bool> markQuickUnlockOnboardingSeen() async {
+    final payload = state.payload;
+    if (!state.isUnlocked || payload == null) return false;
+    if (payload.preferences['quickUnlockOnboardingDismissed'] == true) {
+      return true;
+    }
+    return _persistPayload(
+      payload.copyWith(
+        preferences: Map<String, Object?>.unmodifiable({
+          ...payload.preferences,
+          'quickUnlockOnboardingDismissed': true,
+        }),
+      ),
+    );
+  }
+
   /// Revalidates the master password for a sensitive unlocked operation.
   ///
   /// The password and decrypted verification payload are not retained in state.

@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 /// Stable categories for failures raised by the native screen-capture layer.
 enum ScreenCaptureFailureKind { permissionDenied, unavailable, failed }
 
+/// The best System Settings destination the native runner could open.
+enum ScreenCaptureSettingsDestination { screenRecording, systemSettings }
+
 /// Safe user-facing screen-capture failure without native diagnostic details.
 class ScreenCaptureException implements Exception {
   const ScreenCaptureException(this.kind, this.message);
@@ -19,8 +22,8 @@ abstract interface class ScreenCaptureService {
   /// Returns encoded image bytes, or `null` when the user cancels selection.
   Future<Uint8List?> captureRegion();
 
-  /// Opens the operating system screen-recording permission settings page.
-  Future<void> openPermissionSettings();
+  /// Opens the closest available screen-recording permission settings page.
+  Future<ScreenCaptureSettingsDestination> openPermissionSettings();
 
   /// Fully exits and reopens the installed desktop application.
   Future<void> restartApplication();
@@ -50,9 +53,14 @@ class PlatformScreenCaptureService implements ScreenCaptureService {
   }
 
   @override
-  Future<void> openPermissionSettings() async {
+  Future<ScreenCaptureSettingsDestination> openPermissionSettings() async {
     try {
-      await channel.invokeMethod<void>('openScreenRecordingSettings');
+      final destination = await channel.invokeMethod<String>(
+        'openScreenRecordingSettings',
+      );
+      return destination == 'systemSettings'
+          ? ScreenCaptureSettingsDestination.systemSettings
+          : ScreenCaptureSettingsDestination.screenRecording;
     } on MissingPluginException {
       throw const ScreenCaptureException(
         ScreenCaptureFailureKind.unavailable,
