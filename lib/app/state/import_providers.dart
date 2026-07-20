@@ -13,7 +13,7 @@ final otpImportServiceProvider = Provider<OtpImportService>(
 
 /// Device file picker isolated behind a testable platform boundary.
 final imageImportPickerProvider = Provider<ImageImportPicker>(
-  (ref) => FileSelectorImageImportPicker(),
+  (ref) => const FileSelectorImageImportPicker(),
 );
 
 /// Device clipboard reader isolated behind a testable platform boundary.

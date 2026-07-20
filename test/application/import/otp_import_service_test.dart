@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +50,25 @@ void main() {
     expect(
       const OtpImportService().tryDecodeCameraFrame(png),
       throwsA(isA<OtpImportException>()),
+    );
+  });
+
+  test('stops a stalled image decoder and reports a timeout', () async {
+    final pending = Completer<String>();
+    final service = OtpImportService(
+      imageDecodeTimeout: const Duration(milliseconds: 20),
+      imageDecoder: (bytes, {required maxPixels}) => pending.future,
+    );
+
+    expect(
+      service.decodeImageBytes(Uint8List.fromList(<int>[1])),
+      throwsA(
+        isA<OtpImportException>().having(
+          (error) => error.message,
+          'message',
+          contains('解析超时'),
+        ),
+      ),
     );
   });
 

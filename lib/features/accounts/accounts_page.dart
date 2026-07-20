@@ -11,6 +11,7 @@ import '../../domain/import/google_authenticator_migration.dart';
 import '../../domain/import/otp_import_candidate.dart';
 import '../../domain/totp/totp.dart';
 import '../../platform/clipboard/clipboard_import_reader.dart';
+import '../../platform/files/image_import_picker.dart';
 import '../../platform/screenshot/screen_capture_service.dart';
 import 'account_editor_dialog.dart';
 import 'camera_qr_scanner_dialog.dart';
@@ -41,6 +42,7 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
   final _remaining = <String, int>{};
   late final Timer _ticker;
   bool _isImporting = false;
+  bool _isPickingImage = false;
   GoogleMigrationBatchAccumulator? _migrationBatch;
   String? _selectedGroupId;
 
@@ -205,16 +207,22 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
           ),
         ),
         floatingActionButton: FloatingActionButton.extended(
-          onPressed: session.isProcessing || _isImporting
+          onPressed: session.isProcessing || _isImporting || _isPickingImage
               ? null
               : _showAddOptions,
-          icon: _isImporting
+          icon: _isImporting || _isPickingImage
               ? const SizedBox.square(
                   dimension: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.add_rounded),
-          label: Text(_isImporting ? '正在解析…' : '添加账号'),
+          label: Text(
+            _isPickingImage
+                ? '等待选择图片…'
+                : _isImporting
+                ? '正在解析…'
+                : '添加账号',
+          ),
         ),
       ),
     );
@@ -475,11 +483,30 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
   }
 
   Future<void> _importFromImage() async {
-    if (_isImporting) return;
+    if (_isImporting ||
+        _isPickingImage ||
+        ref.read(vaultSessionProvider).isProcessing) {
+      return;
+    }
+
+    PickedImageData? selected;
+    setState(() => _isPickingImage = true);
+    try {
+      // Let the Flutter dialog finish dismissing before macOS attaches its
+      // native open panel to the same window.
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      selected = await ref.read(imageImportPickerProvider).pickImage();
+    } on Object {
+      if (mounted) _showMessage('无法打开图片选择窗口，请重新尝试。');
+      return;
+    } finally {
+      if (mounted) setState(() => _isPickingImage = false);
+    }
+    if (selected == null || !mounted) return;
+
     setState(() => _isImporting = true);
     try {
-      final selected = await ref.read(imageImportPickerProvider).pickImage();
-      if (selected == null || !mounted) return;
       final result = await ref
           .read(otpImportServiceProvider)
           .decodeImageBytes(selected.bytes);

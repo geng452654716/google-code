@@ -126,6 +126,7 @@ private final class NativeAccountShareCoordinator: NSObject, NSSharingServicePic
 class MainFlutterWindow: NSWindow {
   private var systemSessionEventEmitter: SystemSessionEventEmitter?
   private var nativeAccountShareCoordinator: NativeAccountShareCoordinator?
+  private var imageImportPanel: NSOpenPanel?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -135,6 +136,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerClipboardImportChannel(with: flutterViewController)
+    registerImageImportPickerChannel(with: flutterViewController)
     registerScreenCaptureChannel(with: flutterViewController)
     registerSecureKeyStoreChannel(with: flutterViewController)
     registerNativeAccountShareChannel(with: flutterViewController)
@@ -143,6 +145,88 @@ class MainFlutterWindow: NSWindow {
       messenger: sessionRegistrar.messenger)
 
     super.awakeFromNib()
+  }
+
+  /// Uses an app-activated native panel so the image chooser cannot open behind Flutter.
+  private func registerImageImportPickerChannel(with controller: FlutterViewController) {
+    let registrar = controller.registrar(forPlugin: "ImageImportPicker")
+    let channel = FlutterMethodChannel(
+      name: "google_code/image_import_picker",
+      binaryMessenger: registrar.messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "pickQrImage" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let self else {
+        result(
+          FlutterError(
+            code: "image_picker_unavailable",
+            message: "The image picker is unavailable.",
+            details: nil))
+        return
+      }
+      self.presentImageImportPanel(result: result)
+    }
+  }
+
+  private func presentImageImportPanel(result: @escaping FlutterResult) {
+    guard imageImportPanel == nil else {
+      result(
+        FlutterError(
+          code: "image_picker_busy",
+          message: "An image picker is already open.",
+          details: nil))
+      return
+    }
+
+    NSApp.activate(ignoringOtherApps: true)
+    makeKeyAndOrderFront(nil)
+
+    let panel = NSOpenPanel()
+    panel.title = "选择二维码图片"
+    panel.prompt = "选择图片"
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.resolvesAliases = true
+    panel.allowedFileTypes = ["png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff"]
+    imageImportPanel = panel
+
+    // The Flutter add-account dialog has just closed. Delaying one run-loop turn
+    // prevents AppKit from attaching the open panel beneath its dismissal animation.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak panel] in
+      guard let self, let panel else {
+        result(
+          FlutterError(
+            code: "image_picker_unavailable",
+            message: "The image picker is unavailable.",
+            details: nil))
+        return
+      }
+      NSApp.activate(ignoringOtherApps: true)
+      self.makeKeyAndOrderFront(nil)
+      panel.beginSheetModal(for: self) { [weak self] response in
+        defer { self?.imageImportPanel = nil }
+        guard response == .OK, let url = panel.url else {
+          result(nil)
+          return
+        }
+        do {
+          let data = try Data(contentsOf: url, options: .mappedIfSafe)
+          result([
+            "name": url.lastPathComponent,
+            "bytes": FlutterStandardTypedData(bytes: data),
+          ])
+        } catch {
+          result(
+            FlutterError(
+              code: "image_read_failed",
+              message: "Unable to read the selected image.",
+              details: nil))
+        }
+      }
+    }
   }
 
   /// Exposes the native macOS share picker for one ephemeral account package.

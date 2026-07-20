@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Installs Google Code for the current Windows user.
+Installs TOTP Vault for the current Windows user.
 
 .DESCRIPTION
 Uses a staging directory and a backup directory for recoverable upgrades. The
@@ -42,7 +42,7 @@ if ([string]::IsNullOrWhiteSpace($Destination)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw 'LOCALAPPDATA is not available; provide -Destination explicitly.'
     }
-    $Destination = Join-Path $env:LOCALAPPDATA 'Programs\Google Code'
+    $Destination = Join-Path $env:LOCALAPPDATA 'Programs\TOTP Vault'
 }
 
 $Source = [System.IO.Path]::GetFullPath($Source)
@@ -53,12 +53,12 @@ $ProgramsDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::P
 $ShortcutPath = if ([string]::IsNullOrWhiteSpace($ProgramsDirectory)) {
     $null
 } else {
-    Join-Path $ProgramsDirectory 'Google Code.lnk'
+    Join-Path $ProgramsDirectory 'TOTP Vault.lnk'
 }
 
 function Write-InstallerLog {
     param([Parameter(Mandatory)][string]$Message)
-    Write-Host "[Google Code installer] $Message"
+    Write-Host "[TOTP Vault installer] $Message"
 }
 
 function Assert-SafeDestination {
@@ -75,7 +75,7 @@ function Assert-SafeDestination {
 
 function Assert-AppNotRunning {
     if (Get-Process -Name 'google_code' -ErrorAction SilentlyContinue) {
-        throw 'Google Code is running. Quit it before installing, upgrading, or uninstalling.'
+        throw 'TOTP Vault is running. Quit it before installing, upgrading, or uninstalling.'
     }
 }
 
@@ -101,7 +101,7 @@ function New-ManagedShortcut {
     $shortcut = $shell.CreateShortcut($ShortcutPath)
     $shortcut.TargetPath = $ExecutablePath
     $shortcut.WorkingDirectory = $Destination
-    $shortcut.Description = 'Google Code TOTP authenticator'
+    $shortcut.Description = 'TOTP Vault offline authenticator'
     $shortcut.Save()
     Write-InstallerLog "Start Menu shortcut: $ShortcutPath"
 }

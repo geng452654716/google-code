@@ -8,11 +8,11 @@ SOURCE="$DEFAULT_SOURCE"
 OUTPUT=""
 SKIP_BUILD=false
 DRY_RUN=false
-CODESIGN_IDENTITY="${GOOGLE_CODE_CODESIGN_IDENTITY:-}"
+CODESIGN_IDENTITY="${TOTP_VAULT_CODESIGN_IDENTITY:-${GOOGLE_CODE_CODESIGN_IDENTITY:-}}"
 
 usage() {
   cat <<'USAGE'
-Create a personal-use macOS DMG containing Google Code.app and an Applications shortcut.
+Create a personal-use macOS DMG containing TOTP Vault.app and an Applications shortcut.
 
 Usage:
   bash tool/package_macos_dmg.sh [options]
@@ -23,7 +23,8 @@ Options:
   --skip-build    Reuse an existing Flutter macOS Release build.
   --codesign-identity NAME
                   Re-sign the packaged app with a stable local identity.
-                  Defaults to GOOGLE_CODE_CODESIGN_IDENTITY when set.
+                  Defaults to TOTP_VAULT_CODESIGN_IDENTITY, with GOOGLE_CODE_CODESIGN_IDENTITY
+                  retained as a compatibility fallback.
   --dry-run       Validate inputs and print the intended output without writing files.
   -h, --help      Show this help.
 
@@ -33,11 +34,11 @@ USAGE
 }
 
 log() {
-  printf '[Google Code DMG] %s\n' "$*"
+  printf '[TOTP Vault DMG] %s\n' "$*"
 }
 
 fail() {
-  printf '[Google Code DMG] ERROR: %s\n' "$*" >&2
+  printf '[TOTP Vault DMG] ERROR: %s\n' "$*" >&2
   exit 1
 }
 
@@ -94,7 +95,7 @@ fi
 PACKAGE_VERSION="${APP_VERSION}-build${BUILD_NUMBER}"
 
 if [[ -z "$OUTPUT" ]]; then
-  OUTPUT="$REPOSITORY_ROOT/dist/macos/GoogleCode-${PACKAGE_VERSION}-macos-universal.dmg"
+  OUTPUT="$REPOSITORY_ROOT/dist/macos/TOTPVault-${PACKAGE_VERSION}-macos-universal.dmg"
 fi
 [[ "$OUTPUT" == *.dmg ]] || fail 'Output path must end with .dmg.'
 OUTPUT_DIRECTORY="$(dirname "$OUTPUT")"
@@ -122,7 +123,7 @@ codesign --verify --deep --strict "$SOURCE" || fail 'Source application signatur
 
 log "Source: $SOURCE"
 log "Output: $OUTPUT"
-log 'Contents: Google Code.app plus an Applications shortcut.'
+log 'Contents: TOTP Vault.app plus an Applications shortcut.'
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
   log "Signature identity: $CODESIGN_IDENTITY"
   log 'A stable identity helps macOS retain screen-recording permission across upgrades.'
@@ -147,7 +148,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ditto preserves the bundle layout, executable bits, extended attributes, and signature.
-ditto "$SOURCE" "$STAGING_DIRECTORY/Google Code.app"
+ditto "$SOURCE" "$STAGING_DIRECTORY/TOTP Vault.app"
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
   codesign \
     --force \
@@ -155,14 +156,14 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
     --timestamp=none \
     --preserve-metadata=identifier,entitlements \
     --sign "$CODESIGN_IDENTITY" \
-    "$STAGING_DIRECTORY/Google Code.app"
+    "$STAGING_DIRECTORY/TOTP Vault.app"
 fi
-codesign --verify --deep --strict "$STAGING_DIRECTORY/Google Code.app"
+codesign --verify --deep --strict "$STAGING_DIRECTORY/TOTP Vault.app"
 ln -s /Applications "$STAGING_DIRECTORY/Applications"
 
 rm -f "$TEMPORARY_DMG"
 hdiutil create \
-  -volname 'Google Code' \
+  -volname 'TOTP Vault' \
   -srcfolder "$STAGING_DIRECTORY" \
   -format UDZO \
   -ov \

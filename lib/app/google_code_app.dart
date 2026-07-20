@@ -34,7 +34,7 @@ class _GoogleCodeAppState extends State<GoogleCodeApp> {
     return MaterialApp(
       navigatorKey: _navigatorKey,
       navigatorObservers: [_routeObserver],
-      title: 'Google Code',
+      title: 'TOTP Vault',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       theme: ThemeData(

@@ -34,7 +34,7 @@ abstract interface class BackupFileService {
 /// Desktop implementation that never creates a clear or temporary backup file.
 class FileSelectorBackupFileService implements BackupFileService {
   static const _backupType = XTypeGroup(
-    label: 'Google Code 加密备份',
+    label: 'TOTP Vault 加密备份',
     extensions: ['gcbak'],
     mimeTypes: ['application/octet-stream'],
   );

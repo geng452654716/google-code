@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Builds a personal-use Windows setup EXE for Google Code.
+Builds a personal-use Windows setup EXE for TOTP Vault.
 
 .DESCRIPTION
 Builds or reuses the Flutter Windows Release directory and compiles it with
@@ -32,7 +32,7 @@ $ExecutableName = 'google_code.exe'
 
 function Write-PackagerLog {
     param([Parameter(Mandatory = $true)][string]$Message)
-    Write-Host "[Google Code EXE] $Message"
+    Write-Host "[TOTP Vault EXE] $Message"
 }
 
 function Resolve-InnoCompiler {
@@ -75,7 +75,7 @@ $VersionParts = $VersionValue.Split('+', 2)
 $AppVersion = $VersionParts[0]
 $BuildNumber = if ($VersionParts.Length -eq 2) { $VersionParts[1] } else { '0' }
 $PackageVersion = "$AppVersion-build$BuildNumber"
-$OutputBaseFilename = "GoogleCode-$PackageVersion-windows-x64-setup"
+$OutputBaseFilename = "TOTPVault-$PackageVersion-windows-x64-setup"
 $ExpectedInstaller = Join-Path $OutputDirectory "$OutputBaseFilename.exe"
 $ChecksumPath = "$ExpectedInstaller.sha256"
 

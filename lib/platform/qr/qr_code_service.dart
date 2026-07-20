@@ -45,27 +45,37 @@ class QrCodeService {
     return Uint8List.fromList(img.encodePng(output));
   }
 
-  /// Decodes the first QR code using bounded rotation and inversion attempts.
+  /// Decodes the first QR code using bounded, lazy preprocessing attempts.
   String decodeImage(Uint8List bytes, {int maxPixels = 40 * 1000 * 1000}) {
-    final decoded = img.decodeImage(bytes);
-    if (decoded == null) {
+    final decoder = img.findDecoderForData(bytes);
+    final info = decoder?.startDecode(bytes);
+    if (decoder == null || info == null) {
       throw const FormatException('Unsupported or damaged image.');
     }
-    if (decoded.width * decoded.height > maxPixels) {
+    if (info.width <= 0 ||
+        info.height <= 0 ||
+        info.width > maxPixels ~/ info.height) {
       throw const FormatException('Image pixel count exceeds the limit.');
     }
 
+    final decoded = decoder.decode(bytes, frame: 0);
+    if (decoded == null) {
+      throw const FormatException('Unsupported or damaged image.');
+    }
     final base = _resizeForDecoding(decoded);
-    final candidates = <img.Image>[
-      base,
-      img.copyRotate(base, angle: 90),
-      img.copyRotate(base, angle: 180),
-      img.copyRotate(base, angle: 270),
-      img.invert(img.Image.from(base)),
-    ];
-    for (final candidate in candidates) {
+
+    for (final attempt in const <({bool inverted, bool tryHarder})>[
+      (inverted: false, tryHarder: false),
+      (inverted: false, tryHarder: true),
+      (inverted: true, tryHarder: false),
+      (inverted: true, tryHarder: true),
+    ]) {
       try {
-        return _decodeCandidate(candidate);
+        return _decodeCandidate(
+          base,
+          inverted: attempt.inverted,
+          tryHarder: attempt.tryHarder,
+        );
       } on ReaderException {
         // Continue with the next bounded preprocessing strategy.
       }
@@ -74,7 +84,7 @@ class QrCodeService {
   }
 
   img.Image _resizeForDecoding(img.Image source) {
-    const maxDimension = 2400;
+    const maxDimension = 1600;
     final longest = source.width > source.height ? source.width : source.height;
     if (longest <= maxDimension) return source;
     final scale = maxDimension / longest;
@@ -86,19 +96,29 @@ class QrCodeService {
     );
   }
 
-  String _decodeCandidate(img.Image image) {
+  String _decodeCandidate(
+    img.Image image, {
+    required bool inverted,
+    required bool tryHarder,
+  }) {
     final pixels = Int32List(image.width * image.height);
     var offset = 0;
     for (final pixel in image) {
+      var red = pixel.r.toInt() & 0xff;
+      var green = pixel.g.toInt() & 0xff;
+      var blue = pixel.b.toInt() & 0xff;
+      if (inverted) {
+        red = 0xff - red;
+        green = 0xff - green;
+        blue = 0xff - blue;
+      }
       pixels[offset++] =
-          ((pixel.a.toInt() & 0xff) << 24) |
-          ((pixel.r.toInt() & 0xff) << 16) |
-          ((pixel.g.toInt() & 0xff) << 8) |
-          (pixel.b.toInt() & 0xff);
+          ((pixel.a.toInt() & 0xff) << 24) | (red << 16) | (green << 8) | blue;
     }
     final source = RGBLuminanceSource(image.width, image.height, pixels);
     final bitmap = BinaryBitmap(HybridBinarizer(source));
-    final hints = DecodeHints()..put(DecodeHintType.tryHarder);
+    final hints = DecodeHints();
+    if (tryHarder) hints.put(DecodeHintType.tryHarder);
     return QRCodeReader().decode(bitmap, hints: hints).text;
   }
 }

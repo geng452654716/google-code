@@ -35,7 +35,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Google Code 已锁定'), findsOneWidget);
+      expect(find.text('TOTP Vault 已锁定'), findsOneWidget);
       await tester.enterText(find.byType(TextField).first, 'password123');
       await tester.tap(find.widgetWithText(FilledButton, '解锁'));
       await tester.pumpAndSettle();
@@ -48,7 +48,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('安全设置'), findsNothing);
-      expect(find.text('Google Code 已锁定'), findsOneWidget);
+      expect(find.text('TOTP Vault 已锁定'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('open-security-settings')),
         findsNothing,

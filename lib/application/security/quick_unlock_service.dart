@@ -94,7 +94,7 @@ class QuickUnlockService {
       return QuickUnlockEnableResult.wrongPassword;
     }
     final authResult = await authentication.authenticate(
-      reason: '启用 Google Code 快速解锁',
+      reason: '启用 TOTP Vault 快速解锁',
     );
     final mapped = _mapEnableAuthentication(authResult);
     if (mapped != null) return mapped;
@@ -119,7 +119,7 @@ class QuickUnlockService {
       return const QuickUnlockAttempt(QuickUnlockAttemptStatus.notConfigured);
     }
     final authResult = await authentication.authenticate(
-      reason: '解锁 Google Code',
+      reason: '解锁 TOTP Vault',
     );
     final mapped = _mapAttemptAuthentication(authResult);
     if (mapped != null) return QuickUnlockAttempt(mapped);

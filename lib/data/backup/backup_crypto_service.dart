@@ -75,12 +75,12 @@ class BackupCryptoService {
       if (error.failure == BackupEnvelopeFailure.unsupportedVersion) {
         throw const BackupException(
           BackupFailureKind.unsupportedVersion,
-          '该备份由更高版本的 Google Code 创建，当前版本无法恢复。',
+          '该备份由更高版本的 TOTP Vault 创建，当前版本无法恢复。',
         );
       }
       throw const BackupException(
         BackupFailureKind.invalidFormat,
-        '所选文件不是有效的 Google Code 加密备份。',
+        '所选文件不是有效的 TOTP Vault 加密备份。',
       );
     }
 

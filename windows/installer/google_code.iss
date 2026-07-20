@@ -14,7 +14,7 @@
   #error OutputBaseFilename must be provided by tool/package_windows_exe.ps1.
 #endif
 
-#define AppName "Google Code"
+#define AppName "TOTP Vault"
 #define AppPublisher "gengyujian"
 #define AppExeName "google_code.exe"
 
@@ -24,7 +24,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion} (build {#BuildNumber})
 AppPublisher={#AppPublisher}
-DefaultDirName={localappdata}\Programs\Google Code
+DefaultDirName={localappdata}\Programs\TOTP Vault
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
@@ -40,7 +40,7 @@ CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#AppExeName}
 VersionInfoVersion={#AppVersion}.{#BuildNumber}
-VersionInfoDescription=Google Code personal desktop installer
+VersionInfoDescription=TOTP Vault personal desktop installer
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
 VersionInfoCompany={#AppPublisher}

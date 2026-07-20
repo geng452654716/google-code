@@ -52,7 +52,7 @@ class _UnlockPageState extends ConsumerState<UnlockPage> {
                     Icon(Icons.lock_rounded, size: 52, color: colors.primary),
                     const SizedBox(height: 18),
                     Text(
-                      'Google Code 已锁定',
+                      'TOTP Vault 已锁定',
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                     const SizedBox(height: 8),

@@ -173,7 +173,7 @@ class DesktopCameraQrCaptureService implements CameraQrCaptureService {
         code.contains('restricted')) {
       return const CameraQrCaptureException(
         CameraQrCaptureFailureKind.permissionDenied,
-        '没有摄像头访问权限，请在系统隐私设置中允许 Google Code 使用摄像头。',
+        '没有摄像头访问权限，请在系统隐私设置中允许 TOTP Vault 使用摄像头。',
       );
     }
     return CameraQrCaptureException(

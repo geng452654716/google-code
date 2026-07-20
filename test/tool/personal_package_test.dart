@@ -85,7 +85,7 @@ void main() {
 
       final externalVault = File('${temp.path}/personal.gcvault');
       await externalVault.writeAsString('preserve-me');
-      final output = '${temp.path}/GoogleCode-test.dmg';
+      final output = '${temp.path}/TOTPVault-test.dmg';
       final script = '${repositoryRoot.path}/tool/package_macos_dmg.sh';
 
       final dryRun = await Process.run('bash', [
@@ -116,7 +116,7 @@ void main() {
       expect(await File(output).exists(), isTrue);
       expect(
         await File('$output.sha256').readAsString(),
-        contains('GoogleCode-test.dmg'),
+        contains('TOTPVault-test.dmg'),
       );
       expect(await externalVault.readAsString(), 'preserve-me');
 
@@ -134,7 +134,7 @@ void main() {
       try {
         expect(
           await File(
-            '${mount.path}/Google Code.app/Contents/MacOS/google_code',
+            '${mount.path}/TOTP Vault.app/Contents/MacOS/google_code',
           ).exists(),
           isTrue,
         );

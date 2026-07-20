@@ -34,7 +34,7 @@ void main() {
         'google-code-installer-missing-',
       );
       addTearDown(() => sandbox.deleteSync(recursive: true));
-      final destination = '${sandbox.path}/Google Code.app';
+      final destination = '${sandbox.path}/TOTP Vault.app';
 
       final result = await Process.run('bash', <String>[
         macInstaller.path,
@@ -82,7 +82,7 @@ void main() {
       final fixture = await _createSignedMacAppFixture('version-one');
       addTearDown(() => fixture.sandbox.deleteSync(recursive: true));
       final destination = Directory(
-        '${fixture.sandbox.path}/Applications/Google Code.app',
+        '${fixture.sandbox.path}/Applications/TOTP Vault.app',
       );
       final userData = File('${fixture.sandbox.path}/vault.gcvault')
         ..writeAsStringSync('must survive uninstall');
@@ -171,7 +171,7 @@ Future<({Directory sandbox, Directory app})> _createSignedMacAppFixture(
   <key>CFBundleIdentifier</key>
   <string>com.gengyujian.googleCode.installerFixture</string>
   <key>CFBundleName</key>
-  <string>Google Code Installer Fixture</string>
+  <string>TOTP Vault Installer Fixture</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
 </dict>

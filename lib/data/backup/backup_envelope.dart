@@ -162,7 +162,7 @@ class BackupEnvelope {
       if (decoded is! Map<String, Object?> || decoded['format'] != formatName) {
         throw const BackupEnvelopeException(
           BackupEnvelopeFailure.invalidFormat,
-          'Not a Google Code backup.',
+          'Not a TOTP Vault backup.',
         );
       }
       final version = decoded['formatVersion'];

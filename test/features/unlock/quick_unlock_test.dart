@@ -28,7 +28,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Google Code 已锁定'), findsOneWidget);
+    expect(find.text('TOTP Vault 已锁定'), findsOneWidget);
     expect(find.byKey(const ValueKey('quick-unlock-button')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('quick-unlock-button')));

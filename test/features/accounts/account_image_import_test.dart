@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,44 @@ import 'package:google_code/platform/files/image_import_picker.dart';
 import 'package:google_code/platform/qr/qr_code_service.dart';
 
 void main() {
+  testWidgets('shows image selection state before QR parsing starts', (
+    tester,
+  ) async {
+    final repository = _UnlockedRepository();
+    final picker = _PendingImagePicker();
+    final importService = _TrackingImportService();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          vaultRepositoryProvider.overrideWithValue(repository),
+          vaultSessionProvider.overrideWith(_UnlockedController.new),
+          imageImportPickerProvider.overrideWithValue(picker),
+          otpImportServiceProvider.overrideWithValue(importService),
+        ],
+        child: MaterialApp(home: AccountsPage(onToggleTheme: () {})),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('从二维码图片导入'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('等待选择图片…'), findsOneWidget);
+    expect(find.text('正在解析…'), findsNothing);
+    expect(importService.decodeCalls, 0);
+
+    picker.complete(null);
+    await tester.pumpAndSettle();
+
+    expect(find.text('添加账号'), findsOneWidget);
+    expect(find.text('等待选择图片…'), findsNothing);
+    expect(importService.decodeCalls, 0);
+  });
+
   testWidgets('imports a selected QR image after confirmation', (tester) async {
     const uri =
         'otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example';
@@ -132,4 +171,26 @@ class _UnlockedRepository implements VaultRepository {
 
   @override
   void lock() {}
+}
+
+class _PendingImagePicker implements ImageImportPicker {
+  final _completion = Completer<PickedImageData?>();
+
+  @override
+  Future<PickedImageData?> pickImage() => _completion.future;
+
+  void complete(PickedImageData? value) => _completion.complete(value);
+}
+
+class _TrackingImportService extends OtpImportService {
+  int decodeCalls = 0;
+
+  @override
+  Future<OtpImportResult> decodeImageBytes(
+    Uint8List bytes, {
+    OtpImportSource source = OtpImportSource.imageFile,
+  }) {
+    decodeCalls += 1;
+    throw StateError('decodeImageBytes should not be called in this test.');
+  }
 }

@@ -424,7 +424,7 @@ String _buildNotices({
   required List<_LicenseGroup> groups,
 }) {
   final output = StringBuffer()
-    ..writeln('Google Code Third-Party Notices')
+    ..writeln('TOTP Vault Third-Party Notices')
     ..writeln('Generated: ${timestamp.toIso8601String()}')
     ..writeln()
     ..writeln('This report is generated from the locked dependency snapshot.')

@@ -68,8 +68,8 @@ jobs:
       - name: Smoke test personal macOS install, upgrade, and uninstall
         shell: bash
         run: |
-          destination="$RUNNER_TEMP/Google Code.app"
-          dry_run_destination="$RUNNER_TEMP/Google Code Dry Run.app"
+          destination="$RUNNER_TEMP/TOTP Vault.app"
+          dry_run_destination="$RUNNER_TEMP/TOTP Vault Dry Run.app"
           bash tool/install_macos.sh \
             --source build/macos/Build/Products/Release/google_code.app \
             --destination "$dry_run_destination" \
@@ -104,9 +104,9 @@ jobs:
           mkdir -p "$mount_path"
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_path" "$dmg_path" >/dev/null
           trap 'hdiutil detach "$mount_path" >/dev/null' EXIT
-          test -x "$mount_path/Google Code.app/Contents/MacOS/google_code"
+          test -x "$mount_path/TOTP Vault.app/Contents/MacOS/google_code"
           test -L "$mount_path/Applications"
-          codesign --verify --deep --strict "$mount_path/Google Code.app"
+          codesign --verify --deep --strict "$mount_path/TOTP Vault.app"
 
       - name: Upload macOS personal DMG
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -144,8 +144,8 @@ jobs:
         shell: pwsh
         run: |
           $source = 'build/windows/x64/runner/Release'
-          $destination = Join-Path $env:RUNNER_TEMP 'Google Code'
-          $dryRunDestination = Join-Path $env:RUNNER_TEMP 'Google Code Dry Run'
+          $destination = Join-Path $env:RUNNER_TEMP 'TOTP Vault'
+          $dryRunDestination = Join-Path $env:RUNNER_TEMP 'TOTP Vault Dry Run'
           & ./tool/install_windows.ps1 `
             -Source $source `
             -Destination $dryRunDestination `
@@ -199,7 +199,7 @@ jobs:
           if ($null -eq $setup) {
             throw 'Setup EXE was not produced.'
           }
-          $destination = Join-Path $env:RUNNER_TEMP 'Google Code Setup EXE'
+          $destination = Join-Path $env:RUNNER_TEMP 'TOTP Vault Setup EXE'
           $preservedFixture = Join-Path $env:RUNNER_TEMP 'personal-vault-fixture.gcvault'
           [System.IO.File]::WriteAllText($preservedFixture, 'preserve-me')
           $installArguments = @(

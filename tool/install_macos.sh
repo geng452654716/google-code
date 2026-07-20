@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-# Installs Google Code for the current macOS user without modifying system-wide
+# Installs TOTP Vault for the current macOS user without modifying system-wide
 # locations. Re-running the script performs a recoverable in-place upgrade.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_SOURCE="$REPO_ROOT/build/macos/Build/Products/Release/google_code.app"
-DEFAULT_DESTINATION="$HOME/Applications/Google Code.app"
+DEFAULT_DESTINATION="$HOME/Applications/TOTP Vault.app"
 APP_EXECUTABLE_RELATIVE="Contents/MacOS/google_code"
 
 source_app="$DEFAULT_SOURCE"
@@ -16,22 +16,22 @@ skip_build=false
 launch_after_install=false
 uninstall=false
 dry_run=false
-codesign_identity="${GOOGLE_CODE_CODESIGN_IDENTITY:-}"
+codesign_identity="${TOTP_VAULT_CODESIGN_IDENTITY:-${GOOGLE_CODE_CODESIGN_IDENTITY:-}}"
 
 usage() {
   cat <<'USAGE'
 Usage: bash tool/install_macos.sh [options]
 
-Installs Google Code for the current user. Existing installations are replaced
+Installs TOTP Vault for the current user. Existing installations are replaced
 through staging and backup directories so a failed upgrade can be restored.
 
 Options:
   --source PATH       Source .app bundle. Defaults to the local Release build.
-  --destination PATH  Install path. Defaults to ~/Applications/Google Code.app.
+  --destination PATH  Install path. Defaults to ~/Applications/TOTP Vault.app.
   --skip-build        Do not run a Flutter Release build before installation.
   --codesign-identity NAME
                       Re-sign with a stable local identity before installation.
-                      Defaults to GOOGLE_CODE_CODESIGN_IDENTITY when set.
+                      Defaults to TOTP_VAULT_CODESIGN_IDENTITY (or the legacy GOOGLE_CODE_CODESIGN_IDENTITY) when set.
   --launch            Launch the installed app after a successful install.
   --uninstall         Remove the installed app. Vault and backup data are kept.
   --dry-run           Validate and print the plan without changing files.
@@ -50,7 +50,7 @@ fail() {
 }
 
 log() {
-  printf '[Google Code installer] %s\n' "$1"
+  printf '[TOTP Vault installer] %s\n' "$1"
 }
 
 require_value() {
@@ -118,7 +118,7 @@ if $uninstall && $launch_after_install; then
 fi
 
 if pgrep -x google_code >/dev/null 2>&1; then
-  fail 'Google Code is running. Quit it before installing, upgrading, or uninstalling.'
+  fail 'TOTP Vault is running. Quit it before installing, upgrading, or uninstalling.'
 fi
 
 if $uninstall; then

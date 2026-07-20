@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.gengyujian" "\0"
-            VALUE "FileDescription", "google_code" "\0"
+            VALUE "FileDescription", "TOTP Vault" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "google_code" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.gengyujian. All rights reserved." "\0"
             VALUE "OriginalFilename", "google_code.exe" "\0"
-            VALUE "ProductName", "google_code" "\0"
+            VALUE "ProductName", "TOTP Vault" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -6,6 +7,9 @@ import '../../domain/import/google_authenticator_migration.dart';
 import '../../domain/import/otp_import_candidate.dart';
 import '../../domain/totp/otp_auth_uri_codec.dart';
 import '../../platform/qr/qr_code_service.dart';
+
+typedef QrImageDecoder =
+    Future<String> Function(Uint8List bytes, {required int maxPixels});
 
 /// Safe, user-facing failure raised while turning external data into an account.
 class OtpImportException implements Exception {
@@ -41,10 +45,14 @@ class OtpImportService {
   const OtpImportService({
     this.maxImageBytes = 20 * 1024 * 1024,
     this.maxImagePixels = 40 * 1000 * 1000,
+    this.imageDecodeTimeout = const Duration(seconds: 12),
+    this.imageDecoder,
   });
 
   final int maxImageBytes;
   final int maxImagePixels;
+  final Duration imageDecodeTimeout;
+  final QrImageDecoder? imageDecoder;
 
   /// Decodes one QR image outside the UI isolate and identifies its payload.
   Future<OtpImportResult> decodeImageBytes(
@@ -61,9 +69,9 @@ class OtpImportService {
 
     late final String payload;
     try {
-      payload = await Isolate.run(
-        () => QrCodeService().decodeImage(bytes, maxPixels: maxImagePixels),
-      );
+      payload = await _decodeImagePayload(bytes);
+    } on TimeoutException {
+      throw const OtpImportException('二维码解析超时，请裁剪到二维码区域后重试。');
     } on FormatException {
       throw const OtpImportException('未识别到可用二维码。请确认图片清晰、完整，并只包含标准 TOTP 二维码。');
     } on Object {
@@ -79,15 +87,28 @@ class OtpImportService {
 
     late final String payload;
     try {
-      payload = await Isolate.run(
-        () => QrCodeService().decodeImage(bytes, maxPixels: maxImagePixels),
-      );
+      payload = await _decodeImagePayload(bytes);
     } on Object {
       // A transient or partially written frame is equivalent to no visible QR.
       return null;
     }
 
     return decodeQrText(payload, source: OtpImportSource.camera);
+  }
+
+  Future<String> _decodeImagePayload(Uint8List bytes) {
+    final decoder = imageDecoder;
+    if (decoder != null) {
+      return decoder(
+        bytes,
+        maxPixels: maxImagePixels,
+      ).timeout(imageDecodeTimeout);
+    }
+    return _decodeQrImageInIsolate(
+      bytes,
+      maxPixels: maxImagePixels,
+      timeout: imageDecodeTimeout,
+    );
   }
 
   /// Backward-compatible single-account API used by existing call sites/tests.
@@ -166,5 +187,56 @@ class OtpImportService {
     throw const OtpImportException(
       '该二维码是 Google Authenticator 批量迁移数据，请使用批量导入流程。',
     );
+  }
+}
+
+Future<String> _decodeQrImageInIsolate(
+  Uint8List bytes, {
+  required int maxPixels,
+  required Duration timeout,
+}) async {
+  final resultPort = ReceivePort();
+  Isolate? isolate;
+  try {
+    isolate = await Isolate.spawn<List<Object?>>(
+      _decodeQrImageWorker,
+      <Object?>[
+        resultPort.sendPort,
+        TransferableTypedData.fromList(<Uint8List>[bytes]),
+        maxPixels,
+      ],
+      debugName: 'totp-vault-qr-decoder',
+    );
+    final message = await resultPort.first.timeout(timeout);
+    if (message is! List<Object?> || message.isEmpty) {
+      throw StateError('QR decoder returned an invalid response.');
+    }
+    switch (message.first) {
+      case 'success':
+        return message[1]! as String;
+      case 'format':
+        throw const FormatException('No QR code found in image.');
+      default:
+        throw StateError('QR decoder failed.');
+    }
+  } finally {
+    isolate?.kill(priority: Isolate.immediate);
+    resultPort.close();
+  }
+}
+
+void _decodeQrImageWorker(List<Object?> request) {
+  final sendPort = request[0]! as SendPort;
+  try {
+    final bytes = (request[1]! as TransferableTypedData)
+        .materialize()
+        .asUint8List();
+    final maxPixels = request[2]! as int;
+    final payload = QrCodeService().decodeImage(bytes, maxPixels: maxPixels);
+    sendPort.send(<Object?>['success', payload]);
+  } on FormatException {
+    sendPort.send(<Object?>['format']);
+  } on Object {
+    sendPort.send(<Object?>['error']);
   }
 }
