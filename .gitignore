@@ -49,6 +49,7 @@ app.*.map.json
 .fvm/flutter_sdk
 
 # Google Code sensitive local data and exported backups
+.local-recovery/
 *.gcvault
 *.gcbak
 .env

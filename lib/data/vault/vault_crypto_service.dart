@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
@@ -12,11 +13,15 @@ class OpenedVault {
     required this.envelope,
     required this.dataEncryptionKey,
     required this.payload,
+    this.payloadRequiresReencryption = false,
   });
 
   final VaultEnvelope envelope;
   final SecretKey dataEncryptionKey;
   final Map<String, Object?> payload;
+
+  /// Whether this payload was recovered from the historical zeroed-DEK bug.
+  final bool payloadRequiresReencryption;
 }
 
 /// Encrypts and decrypts the versioned local vault envelope.
@@ -104,6 +109,7 @@ class VaultCryptoService {
     return _openPayloadWithCompatibleAuthentication(
       envelope,
       dataEncryptionKey,
+      allowZeroedKeyRecovery: true,
     );
   }
 
@@ -118,7 +124,12 @@ class VaultCryptoService {
     if (dataEncryptionKeyBytes.length != 32) {
       throw const VaultUnlockException('Quick unlock key is invalid.');
     }
-    final dataEncryptionKey = SecretKey(dataEncryptionKeyBytes);
+    // SecretKeyData keeps the supplied List by reference. QuickUnlockService
+    // clears its temporary Keychain buffer after this method returns, so the
+    // active session must own an independent copy before that buffer is wiped.
+    final dataEncryptionKey = SecretKey(
+      Uint8List.fromList(dataEncryptionKeyBytes),
+    );
     return _openPayloadWithCompatibleAuthentication(
       envelope,
       dataEncryptionKey,
@@ -158,26 +169,40 @@ class VaultCryptoService {
 
   Future<OpenedVault> _openPayloadWithCompatibleAuthentication(
     VaultEnvelope envelope,
-    SecretKey dataEncryptionKey,
-  ) async {
-    final aadCandidates = <List<int>>[_payloadAad, ..._legacyPayloadAads];
-    for (final aad in aadCandidates) {
-      late final List<int> clearBytes;
-      try {
-        clearBytes = await _cipher.decrypt(
-          envelope.payload.toSecretBox(),
-          secretKey: dataEncryptionKey,
-          aad: aad,
-        );
-      } on SecretBoxAuthenticationError {
-        continue;
-      }
-
-      return _decodeAuthenticatedPayload(
-        envelope,
-        dataEncryptionKey,
-        clearBytes,
+    SecretKey dataEncryptionKey, {
+    bool allowZeroedKeyRecovery = false,
+  }) async {
+    final opened = await _tryOpenPayloadWithCompatibleAuthentication(
+      envelope,
+      decryptionKey: dataEncryptionKey,
+      retainedKey: dataEncryptionKey,
+    );
+    if (opened != null) return opened;
+    if (!allowZeroedKeyRecovery) {
+      throw const VaultUnlockException(
+        'Vault payload authentication failed for every supported format.',
+        VaultUnlockFailureKind.payloadAuthenticationFailed,
       );
+    }
+
+    // Versions before the quick-unlock key ownership fix could clear the
+    // active DEK after Touch ID succeeded. Data saved in that session was then
+    // authenticated with an all-zero AES-256 key while wrappedDek still held
+    // the correct DEK. Only attempt this compatibility recovery after the
+    // master password has successfully unwrapped the canonical DEK. Device-
+    // key unlock intentionally cannot use this fallback because a stale device
+    // key cannot independently prove that it belongs to this Vault.
+    final zeroedKey = SecretKey(Uint8List(32));
+    try {
+      final recovered = await _tryOpenPayloadWithCompatibleAuthentication(
+        envelope,
+        decryptionKey: zeroedKey,
+        retainedKey: dataEncryptionKey,
+        payloadRequiresReencryption: true,
+      );
+      if (recovered != null) return recovered;
+    } finally {
+      zeroedKey.destroy();
     }
 
     throw const VaultUnlockException(
@@ -186,11 +211,41 @@ class VaultCryptoService {
     );
   }
 
+  Future<OpenedVault?> _tryOpenPayloadWithCompatibleAuthentication(
+    VaultEnvelope envelope, {
+    required SecretKey decryptionKey,
+    required SecretKey retainedKey,
+    bool payloadRequiresReencryption = false,
+  }) async {
+    final aadCandidates = <List<int>>[_payloadAad, ..._legacyPayloadAads];
+    for (final aad in aadCandidates) {
+      late final List<int> clearBytes;
+      try {
+        clearBytes = await _cipher.decrypt(
+          envelope.payload.toSecretBox(),
+          secretKey: decryptionKey,
+          aad: aad,
+        );
+      } on SecretBoxAuthenticationError {
+        continue;
+      }
+
+      return _decodeAuthenticatedPayload(
+        envelope,
+        retainedKey,
+        clearBytes,
+        payloadRequiresReencryption: payloadRequiresReencryption,
+      );
+    }
+    return null;
+  }
+
   OpenedVault _decodeAuthenticatedPayload(
     VaultEnvelope envelope,
     SecretKey dataEncryptionKey,
-    List<int> clearBytes,
-  ) {
+    List<int> clearBytes, {
+    bool payloadRequiresReencryption = false,
+  }) {
     try {
       final decoded = jsonDecode(utf8.decode(clearBytes));
       if (decoded is! Map) {
@@ -200,6 +255,7 @@ class VaultCryptoService {
         envelope: envelope,
         dataEncryptionKey: dataEncryptionKey,
         payload: decoded.cast<String, Object?>(),
+        payloadRequiresReencryption: payloadRequiresReencryption,
       );
     } on FormatException {
       throw const VaultUnlockException(

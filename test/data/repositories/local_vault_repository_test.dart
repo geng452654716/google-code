@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_code/core/errors/vault_exception.dart';
 import 'package:google_code/data/repositories/local_vault_repository.dart';
@@ -81,6 +83,106 @@ void main() {
       expect(restored.updatedAt, updatedAt);
 
       quickUnlockKey.fillRange(0, quickUnlockKey.length, 0);
+    },
+  );
+
+  test(
+    'keeps password and quick unlock valid after saving from a quick-unlock session',
+    () async {
+      final repository = createRepository();
+      final initial = await repository.create('password123');
+      final transientQuickUnlockBuffer = await repository
+          .exportQuickUnlockKey();
+      final retainedQuickUnlockKey = Uint8List.fromList(
+        transientQuickUnlockBuffer,
+      );
+      repository.lock();
+
+      final quickUnlockRepository = createRepository();
+      final unlocked = await quickUnlockRepository.unlockWithQuickUnlockKey(
+        transientQuickUnlockBuffer,
+      );
+      transientQuickUnlockBuffer.fillRange(
+        0,
+        transientQuickUnlockBuffer.length,
+        0,
+      );
+      await quickUnlockRepository.save(
+        unlocked.copyWith(updatedAt: DateTime.utc(2026, 7, 20, 9)),
+      );
+      await quickUnlockRepository.save(
+        initial.copyWith(updatedAt: DateTime.utc(2026, 7, 20, 10)),
+      );
+      quickUnlockRepository.lock();
+
+      final passwordRestored = await createRepository().unlock('password123');
+      expect(passwordRestored.updatedAt, DateTime.utc(2026, 7, 20, 10));
+      final quickRestored = await createRepository().unlockWithQuickUnlockKey(
+        retainedQuickUnlockKey,
+      );
+      expect(quickRestored.updatedAt, DateTime.utc(2026, 7, 20, 10));
+      retainedQuickUnlockKey.fillRange(0, retainedQuickUnlockKey.length, 0);
+    },
+  );
+
+  test(
+    'repairs payloads written with the historical zeroed quick-unlock key',
+    () async {
+      final service = VaultCryptoService();
+      final payload = VaultPayload.empty(
+        DateTime.utc(2026, 7, 20, 8),
+      ).copyWith(updatedAt: DateTime.utc(2026, 7, 20, 11));
+      final created = await service.createOpened(
+        payload.toJson(),
+        'password123',
+        kdf: fastKdf,
+      );
+      final zeroedKey = SecretKey(Uint8List(32));
+      final historicalPayload = await AesGcm.with256bits().encrypt(
+        utf8.encode(jsonEncode(payload.toJson())),
+        secretKey: zeroedKey,
+        aad: utf8.encode('google-code:v1:payload'),
+      );
+      zeroedKey.destroy();
+      final historicalEnvelope = VaultEnvelope(
+        version: created.envelope.version,
+        kdf: created.envelope.kdf,
+        salt: created.envelope.salt,
+        wrappedDek: created.envelope.wrappedDek,
+        payload: VaultCipherBox.fromSecretBox(historicalPayload),
+      );
+      await vaultFile.writeAsString(historicalEnvelope.encode(), flush: true);
+      await File(
+        '${vaultFile.path}.bak',
+      ).writeAsString(historicalEnvelope.encode(), flush: true);
+
+      final canonicalQuickUnlockKey = Uint8List.fromList(
+        await created.dataEncryptionKey.extractBytes(),
+      );
+      await expectLater(
+        service.openWithDataEncryptionKey(
+          historicalEnvelope,
+          canonicalQuickUnlockKey,
+        ),
+        throwsA(
+          isA<VaultUnlockException>().having(
+            (error) => error.kind,
+            'kind',
+            VaultUnlockFailureKind.payloadAuthenticationFailed,
+          ),
+        ),
+      );
+      canonicalQuickUnlockKey.fillRange(0, canonicalQuickUnlockKey.length, 0);
+
+      final recovered = await createRepository().unlock('password123');
+      expect(recovered.updatedAt, DateTime.utc(2026, 7, 20, 11));
+
+      final repairedEnvelope = VaultEnvelope.decode(
+        await vaultFile.readAsString(),
+      );
+      final reopened = await service.open(repairedEnvelope, 'password123');
+      expect(reopened.payloadRequiresReencryption, isFalse);
+      expect(reopened.payload['updatedAt'], payload.toJson()['updatedAt']);
     },
   );
 

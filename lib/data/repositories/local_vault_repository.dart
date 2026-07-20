@@ -58,10 +58,11 @@ class LocalVaultRepository implements VaultRepository {
     if (!await store.exists()) {
       throw const VaultUnlockException('Vault does not exist.');
     }
-    final result = await _openAvailableCopies(
+    final openedResult = await _openAvailableCopies(
       store,
       (envelope) => _cryptoService.open(envelope, password),
     );
+    final result = await _repairRecoveredPayload(store, openedResult);
     _openedVault = result.openedVault;
     _openedFromBackup = result.fromBackup;
     return result.payload;
@@ -73,11 +74,12 @@ class LocalVaultRepository implements VaultRepository {
     if (!await store.exists()) {
       throw const VaultUnlockException('Vault does not exist.');
     }
-    final result = await _openAvailableCopies(
+    final openedResult = await _openAvailableCopies(
       store,
       (envelope) =>
           _cryptoService.openWithDataEncryptionKey(envelope, keyBytes),
     );
+    final result = await _repairRecoveredPayload(store, openedResult);
     _openedVault = result.openedVault;
     _openedFromBackup = result.fromBackup;
     return result.payload;
@@ -135,6 +137,29 @@ class LocalVaultRepository implements VaultRepository {
   void lock() {
     _openedVault = null;
     _openedFromBackup = false;
+  }
+
+  /// Re-encrypts payloads written by the historical zeroed quick-unlock DEK.
+  ///
+  /// The master password has already unwrapped the canonical DEK before this
+  /// path is reachable. Preserve the existing backup while the
+  /// primary copy is atomically repaired with that canonical DEK.
+  Future<_OpenedVaultResult> _repairRecoveredPayload(
+    VaultFileStore store,
+    _OpenedVaultResult result,
+  ) async {
+    if (!result.openedVault.payloadRequiresReencryption) return result;
+
+    final repaired = await _cryptoService.updatePayload(
+      result.openedVault,
+      result.payload.toJson(),
+    );
+    await store.writeRecovered(repaired.envelope);
+    return _OpenedVaultResult(
+      openedVault: repaired,
+      payload: result.payload,
+      fromBackup: false,
+    );
   }
 
   Future<_OpenedVaultResult> _openAvailableCopies(

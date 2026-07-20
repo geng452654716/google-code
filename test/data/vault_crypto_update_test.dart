@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_code/data/vault/vault.dart';
 
@@ -31,6 +33,32 @@ void main() {
 
       final reopened = await service.open(updated.envelope, 'password123');
       expect(reopened.payload, {'revision': 2});
+    },
+  );
+
+  test(
+    'quick-unlock session owns its DEK after the caller clears its buffer',
+    () async {
+      final service = VaultCryptoService();
+      final created = await service.createOpened(
+        {'revision': 1},
+        'password123',
+        kdf: fastKdf,
+      );
+      final quickUnlockBuffer = Uint8List.fromList(
+        await created.dataEncryptionKey.extractBytes(),
+      );
+
+      final opened = await service.openWithDataEncryptionKey(
+        created.envelope,
+        quickUnlockBuffer,
+      );
+      quickUnlockBuffer.fillRange(0, quickUnlockBuffer.length, 0);
+      final updated = await service.updatePayload(opened, {'revision': 2});
+
+      final reopened = await service.open(updated.envelope, 'password123');
+      expect(reopened.payload, {'revision': 2});
+      expect(reopened.payloadRequiresReencryption, isFalse);
     },
   );
 }
