@@ -299,6 +299,110 @@ class VaultSessionController extends Notifier<VaultSessionState> {
     }
   }
 
+  /// Creates a locally encrypted account group.
+  Future<bool> createGroup(String name) async {
+    final payload = state.payload;
+    if (payload == null || state.isProcessing) return false;
+    final normalizedName = _normalizeGroupName(name);
+    if (normalizedName == null) return false;
+    if (_hasGroupName(payload.groups, normalizedName)) {
+      state = state.copyWith(message: '该分组名称已经存在');
+      return false;
+    }
+
+    final now = DateTime.now().toUtc();
+    final group = <String, Object?>{
+      'id': _uuid.v4(),
+      'name': normalizedName,
+      'sortOrder': payload.groups.length,
+      'createdAt': now.toIso8601String(),
+      'updatedAt': now.toIso8601String(),
+    };
+    return _persistPayload(
+      payload.copyWith(groups: List.unmodifiable([...payload.groups, group])),
+    );
+  }
+
+  /// Renames a group without changing its identity or account assignments.
+  Future<bool> renameGroup(String id, String name) async {
+    final payload = state.payload;
+    if (payload == null || state.isProcessing) return false;
+    final normalizedName = _normalizeGroupName(name);
+    if (normalizedName == null) return false;
+    final index = payload.groups.indexWhere((group) => group['id'] == id);
+    if (index < 0) {
+      state = state.copyWith(message: '找不到要编辑的分组');
+      return false;
+    }
+    if (_hasGroupName(payload.groups, normalizedName, excludingId: id)) {
+      state = state.copyWith(message: '该分组名称已经存在');
+      return false;
+    }
+
+    final groups = payload.groups.map(Map<String, Object?>.of).toList();
+    groups[index]
+      ..['name'] = normalizedName
+      ..['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+    return _persistPayload(payload.copyWith(groups: List.unmodifiable(groups)));
+  }
+
+  /// Deletes a group and atomically moves its accounts to "ungrouped".
+  Future<bool> deleteGroup(String id) async {
+    final payload = state.payload;
+    if (payload == null || state.isProcessing) return false;
+    if (!payload.groups.any((group) => group['id'] == id)) {
+      state = state.copyWith(message: '找不到要删除的分组');
+      return false;
+    }
+
+    final now = DateTime.now().toUtc();
+    final groups = payload.groups
+        .where((group) => group['id'] != id)
+        .map(Map<String, Object?>.of)
+        .toList(growable: false);
+    final accounts = payload.accounts
+        .map(
+          (account) => account.groupId == id
+              ? account.copyWith(clearGroup: true, updatedAt: now)
+              : account,
+        )
+        .toList(growable: false);
+    return _persistPayload(
+      payload.copyWith(
+        groups: List.unmodifiable(groups),
+        accounts: List.unmodifiable(accounts),
+      ),
+    );
+  }
+
+  /// Moves an account into a group, or clears its group when [groupId] is null.
+  Future<bool> moveAccountToGroup(String accountId, String? groupId) async {
+    final payload = state.payload;
+    if (payload == null || state.isProcessing) return false;
+    if (groupId != null &&
+        !payload.groups.any((group) => group['id'] == groupId)) {
+      state = state.copyWith(message: '目标分组不存在');
+      return false;
+    }
+    final index = payload.accounts.indexWhere(
+      (account) => account.id == accountId,
+    );
+    if (index < 0) {
+      state = state.copyWith(message: '找不到要移动的账号');
+      return false;
+    }
+    final current = payload.accounts[index];
+    if (current.groupId == groupId) return true;
+
+    final accounts = payload.accounts.toList();
+    accounts[index] = current.copyWith(
+      groupId: groupId,
+      clearGroup: groupId == null,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    return _persistAccounts(accounts);
+  }
+
   /// Permanently removes one account from the encrypted payload.
   Future<bool> deleteAccount(String id) async {
     final payload = state.payload;
@@ -308,6 +412,32 @@ class VaultSessionController extends Notifier<VaultSessionState> {
         .toList(growable: false);
     if (accounts.length == payload.accounts.length) return false;
     return _persistAccounts(accounts);
+  }
+
+  String? _normalizeGroupName(String name) {
+    final normalized = name.trim();
+    if (normalized.isEmpty) {
+      state = state.copyWith(message: '请输入分组名称');
+      return null;
+    }
+    if (normalized.runes.length > 40) {
+      state = state.copyWith(message: '分组名称最多 40 个字符');
+      return null;
+    }
+    return normalized;
+  }
+
+  bool _hasGroupName(
+    List<Map<String, Object?>> groups,
+    String name, {
+    String? excludingId,
+  }) {
+    final normalized = name.toLowerCase();
+    return groups.any(
+      (group) =>
+          group['id'] != excludingId &&
+          (group['name'] as String?)?.trim().toLowerCase() == normalized,
+    );
   }
 
   AccountDraft? _normalizeDraft(AccountDraft draft) {
@@ -366,15 +496,21 @@ class VaultSessionController extends Notifier<VaultSessionState> {
   Future<bool> _persistAccounts(List<Account> accounts) async {
     final payload = state.payload;
     if (payload == null) return false;
+    return _persistPayload(
+      payload.copyWith(accounts: List.unmodifiable(accounts)),
+    );
+  }
+
+  Future<bool> _persistPayload(VaultPayload updatedPayload) async {
+    if (!state.isUnlocked || state.isProcessing) return false;
     state = state.copyWith(isProcessing: true, clearMessage: true);
-    final updatedPayload = payload.copyWith(
-      accounts: List.unmodifiable(accounts),
+    final persistedPayload = updatedPayload.copyWith(
       updatedAt: DateTime.now().toUtc(),
     );
     try {
-      await _repository.save(updatedPayload);
+      await _repository.save(persistedPayload);
       state = state.copyWith(
-        payload: updatedPayload,
+        payload: persistedPayload,
         isProcessing: false,
         clearMessage: true,
       );

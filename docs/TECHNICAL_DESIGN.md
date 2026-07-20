@@ -1,7 +1,7 @@
 # Google Code 桌面动态验证码生成器技术设计文档
 
-- 文档版本：v0.3（阶段 13 实现同步）
-- 编写日期：2026-07-17
+- 文档版本：v0.4（阶段 18 实现同步）
+- 更新日期：2026-07-20
 - 对应需求：`docs/PRD.md` v0.1
 - 推荐技术栈：Flutter Desktop + Dart
 - 推荐首发平台：macOS、Windows
@@ -16,6 +16,7 @@
 - 图片、剪贴板、区域截图、摄像头二维码导入。
 - Google Authenticator 迁移二维码解析。
 - 单个账号 Secret、`otpauth://` 链接和二维码安全分享。
+- 本地分组管理、筛选与桌面拖拽归类。
 - macOS、Windows 平台能力适配。
 - 模块拆分、数据格式、测试、构建和发布。
 
@@ -284,7 +285,14 @@ class Account {
 - `createdAt`
 - `updatedAt`
 
-删除分组只解除账号关联，不删除账号。
+删除分组只解除账号关联，不删除账号。阶段 18 的实现约束如下：
+
+- `VaultPayload.groups` 继续使用 schema v1 中的 map 列表，避免破坏已有 Vault 和 `.gcbak` 备份兼容性。
+- 分组名称 trim 后不能为空，最多 40 个 Unicode 字符，并按不区分大小写的方式拒绝重复。
+- 新建、重命名、删除分组以及移动账号都通过 `VaultSessionController` 完成一次完整 Vault 原子保存。
+- 删除分组和清空关联账号的 `groupId` 在同一事务提交；保存失败时内存 UI 保持原状态。
+- 桌面 UI 使用左侧分组栏；账号卡片只在明确拖拽手柄上启用 `Draggable`，避免与复制、编辑、分享和删除点击操作冲突。
+- “未分组”是 UI 虚拟筛选项，不写入 group map；账号移入该项时把 `groupId` 清空。
 
 ### 8.3 VaultPayload
 

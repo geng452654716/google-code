@@ -23,6 +23,8 @@ import '../security/security_settings_dialog.dart';
 
 enum _ScreenCapturePermissionAction { cancel, openSettings, restart }
 
+const _ungroupedGroupId = '__ungrouped__';
+
 /// Main unlocked account list backed by the encrypted local Vault.
 class AccountsPage extends ConsumerStatefulWidget {
   const AccountsPage({required this.onToggleTheme, super.key});
@@ -40,6 +42,7 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
   late final Timer _ticker;
   bool _isImporting = false;
   GoogleMigrationBatchAccumulator? _migrationBatch;
+  String? _selectedGroupId;
 
   @override
   void initState() {
@@ -85,7 +88,19 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(vaultSessionProvider);
-    final accounts = session.visibleAccounts;
+    final allAccounts = session.payload?.accounts ?? const <Account>[];
+    final groups = _AccountGroupView.fromPayload(session.payload?.groups);
+    final visibleAccounts = session.visibleAccounts
+        .where((account) {
+          if (_selectedGroupId == null) {
+            return true;
+          }
+          if (_selectedGroupId == _ungroupedGroupId) {
+            return account.groupId == null;
+          }
+          return account.groupId == _selectedGroupId;
+        })
+        .toList(growable: false);
     return Focus(
       autofocus: true,
       onKeyEvent: _handlePasteShortcut,
@@ -103,7 +118,7 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
                 child: Column(
                   children: [
                     _Header(
-                      accountCount: session.payload?.accounts.length ?? 0,
+                      accountCount: allAccounts.length,
                       onSearch: ref
                           .read(vaultSessionProvider.notifier)
                           .setSearchQuery,
@@ -119,42 +134,66 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
                         onCancel: () => setState(() => _migrationBatch = null),
                       ),
                     Expanded(
-                      child: accounts.isEmpty
-                          ? _EmptyState(
-                              isSearching: session.searchQuery
-                                  .trim()
-                                  .isNotEmpty,
-                              onAdd: _showAddOptions,
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(
-                                32,
-                                8,
-                                32,
-                                100,
-                              ),
-                              itemCount: accounts.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 12),
-                              itemBuilder: (context, index) {
-                                final account = accounts[index];
-                                return _AccountCard(
-                                  account: account,
-                                  code:
-                                      _codes[account.id] ??
-                                      (account.digits == 8
-                                          ? '--------'
-                                          : '------'),
-                                  remainingSeconds:
-                                      _remaining[account.id] ??
-                                      account.periodSeconds,
-                                  onCopy: () => _copyCode(account),
-                                  onEdit: () => _showEditDialog(account),
-                                  onShare: () => _showShareDialog(account),
-                                  onDelete: () => _confirmDelete(account),
-                                );
-                              },
-                            ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _GroupSidebar(
+                            groups: groups,
+                            accounts: allAccounts,
+                            selectedGroupId: _selectedGroupId,
+                            isProcessing: session.isProcessing,
+                            onSelect: (groupId) =>
+                                setState(() => _selectedGroupId = groupId),
+                            onCreate: _showCreateGroupDialog,
+                            onRename: _showRenameGroupDialog,
+                            onDelete: _confirmDeleteGroup,
+                            onMoveAccount: _moveAccountToGroup,
+                          ),
+                          VerticalDivider(
+                            width: 1,
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                          ),
+                          Expanded(
+                            child: visibleAccounts.isEmpty
+                                ? _EmptyState(
+                                    isSearching:
+                                        session.searchQuery.trim().isNotEmpty ||
+                                        _selectedGroupId != null,
+                                    onAdd: _showAddOptions,
+                                  )
+                                : ListView.separated(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      28,
+                                      8,
+                                      32,
+                                      100,
+                                    ),
+                                    itemCount: visibleAccounts.length,
+                                    separatorBuilder: (_, _) =>
+                                        const SizedBox(height: 12),
+                                    itemBuilder: (context, index) {
+                                      final account = visibleAccounts[index];
+                                      return _AccountCard(
+                                        account: account,
+                                        code:
+                                            _codes[account.id] ??
+                                            (account.digits == 8
+                                                ? '--------'
+                                                : '------'),
+                                        remainingSeconds:
+                                            _remaining[account.id] ??
+                                            account.periodSeconds,
+                                        onCopy: () => _copyCode(account),
+                                        onEdit: () => _showEditDialog(account),
+                                        onShare: () =>
+                                            _showShareDialog(account),
+                                        onDelete: () => _confirmDelete(account),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -176,6 +215,128 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
         ),
       ),
     );
+  }
+
+  Future<String?> _showGroupNameDialog({
+    required String title,
+    String initialValue = '',
+  }) async {
+    var value = initialValue;
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextFormField(
+          key: const ValueKey('group-name-field'),
+          initialValue: initialValue,
+          autofocus: true,
+          maxLength: 40,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(
+            labelText: '分组名称',
+            hintText: '例如：工作、个人、服务器',
+          ),
+          onChanged: (text) => value = text,
+          onFieldSubmitted: (text) {
+            if (text.trim().isNotEmpty) Navigator.of(context).pop(text);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const ValueKey('save-group-name'),
+            onPressed: () => Navigator.of(context).pop(value),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCreateGroupDialog() async {
+    final name = await _showGroupNameDialog(title: '新建分组');
+    if (name == null || !mounted) return;
+    final created = await ref
+        .read(vaultSessionProvider.notifier)
+        .createGroup(name);
+    if (!mounted) return;
+    if (created) {
+      _showMessage('分组已创建');
+    } else {
+      _showMessage(ref.read(vaultSessionProvider).message ?? '创建分组失败');
+    }
+  }
+
+  Future<void> _showRenameGroupDialog(_AccountGroupView group) async {
+    final name = await _showGroupNameDialog(
+      title: '重命名分组',
+      initialValue: group.name,
+    );
+    if (name == null || !mounted) return;
+    final renamed = await ref
+        .read(vaultSessionProvider.notifier)
+        .renameGroup(group.id, name);
+    if (!mounted) return;
+    if (renamed) {
+      _showMessage('分组已重命名');
+    } else {
+      _showMessage(ref.read(vaultSessionProvider).message ?? '重命名分组失败');
+    }
+  }
+
+  Future<void> _confirmDeleteGroup(_AccountGroupView group) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('删除「${group.name}」？'),
+        content: const Text('删除分组不会删除其中的验证码账号，账号将移到“未分组”。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除分组'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final deleted = await ref
+        .read(vaultSessionProvider.notifier)
+        .deleteGroup(group.id);
+    if (!mounted) return;
+    if (deleted) {
+      if (_selectedGroupId == group.id) {
+        setState(() => _selectedGroupId = _ungroupedGroupId);
+      }
+      _showMessage('分组已删除，账号已移到未分组');
+    } else {
+      _showMessage(ref.read(vaultSessionProvider).message ?? '删除分组失败');
+    }
+  }
+
+  Future<void> _moveAccountToGroup(
+    String accountId,
+    String? groupId,
+    String destinationName,
+  ) async {
+    final moved = await ref
+        .read(vaultSessionProvider.notifier)
+        .moveAccountToGroup(accountId, groupId);
+    if (!mounted) return;
+    if (moved) {
+      _showMessage(groupId == null ? '已移到未分组' : '已移动到「$destinationName」');
+    } else {
+      _showMessage(ref.read(vaultSessionProvider).message ?? '移动账号失败');
+    }
   }
 
   /// Opens backup export or restore only after the entry dialog closes.
@@ -728,6 +889,270 @@ class _MigrationProgressBanner extends StatelessWidget {
   }
 }
 
+class _AccountGroupView {
+  const _AccountGroupView({
+    required this.id,
+    required this.name,
+    required this.sortOrder,
+  });
+
+  final String id;
+  final String name;
+  final int sortOrder;
+
+  static List<_AccountGroupView> fromPayload(
+    List<Map<String, Object?>>? source,
+  ) {
+    final groups = <_AccountGroupView>[];
+    for (final value in source ?? const <Map<String, Object?>>[]) {
+      final id = value['id'];
+      final name = value['name'];
+      if (id is! String ||
+          id.isEmpty ||
+          name is! String ||
+          name.trim().isEmpty) {
+        continue;
+      }
+      groups.add(
+        _AccountGroupView(
+          id: id,
+          name: name.trim(),
+          sortOrder: value['sortOrder'] is int
+              ? value['sortOrder']! as int
+              : groups.length,
+        ),
+      );
+    }
+    groups.sort((left, right) {
+      final order = left.sortOrder.compareTo(right.sortOrder);
+      return order != 0
+          ? order
+          : left.name.toLowerCase().compareTo(right.name.toLowerCase());
+    });
+    return groups;
+  }
+}
+
+typedef _MoveAccountToGroup =
+    Future<void> Function(
+      String accountId,
+      String? groupId,
+      String destinationName,
+    );
+
+class _GroupSidebar extends StatelessWidget {
+  const _GroupSidebar({
+    required this.groups,
+    required this.accounts,
+    required this.selectedGroupId,
+    required this.isProcessing,
+    required this.onSelect,
+    required this.onCreate,
+    required this.onRename,
+    required this.onDelete,
+    required this.onMoveAccount,
+  });
+
+  final List<_AccountGroupView> groups;
+  final List<Account> accounts;
+  final String? selectedGroupId;
+  final bool isProcessing;
+  final ValueChanged<String?> onSelect;
+  final VoidCallback onCreate;
+  final ValueChanged<_AccountGroupView> onRename;
+  final ValueChanged<_AccountGroupView> onDelete;
+  final _MoveAccountToGroup onMoveAccount;
+
+  @override
+  Widget build(BuildContext context) {
+    final ungroupedCount = accounts
+        .where((account) => account.groupId == null)
+        .length;
+    return SizedBox(
+      width: 236,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 14, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 2, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '分组',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton.filledTonal(
+                    key: const ValueKey('create-group-button'),
+                    tooltip: '新建分组',
+                    onPressed: isProcessing ? null : onCreate,
+                    icon: const Icon(Icons.create_new_folder_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  _GroupDropTile(
+                    key: const ValueKey('group-filter-all'),
+                    label: '全部账号',
+                    icon: Icons.all_inbox_rounded,
+                    count: accounts.length,
+                    selected: selectedGroupId == null,
+                    acceptsDrop: false,
+                    isProcessing: isProcessing,
+                    onTap: () => onSelect(null),
+                    onMoveAccount: onMoveAccount,
+                  ),
+                  const SizedBox(height: 4),
+                  _GroupDropTile(
+                    key: const ValueKey('group-drop-ungrouped'),
+                    label: '未分组',
+                    icon: Icons.folder_off_rounded,
+                    count: ungroupedCount,
+                    selected: selectedGroupId == _ungroupedGroupId,
+                    acceptsDrop: true,
+                    isProcessing: isProcessing,
+                    onTap: () => onSelect(_ungroupedGroupId),
+                    onMoveAccount: onMoveAccount,
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    child: Divider(height: 1),
+                  ),
+                  for (final group in groups) ...[
+                    _GroupDropTile(
+                      key: ValueKey('group-drop-${group.id}'),
+                      label: group.name,
+                      icon: Icons.folder_rounded,
+                      count: accounts
+                          .where((account) => account.groupId == group.id)
+                          .length,
+                      selected: selectedGroupId == group.id,
+                      destinationGroupId: group.id,
+                      acceptsDrop: true,
+                      isProcessing: isProcessing,
+                      onTap: () => onSelect(group.id),
+                      onMoveAccount: onMoveAccount,
+                      trailing: PopupMenuButton<String>(
+                        tooltip: '分组操作',
+                        enabled: !isProcessing,
+                        onSelected: (value) {
+                          if (value == 'rename') onRename(group);
+                          if (value == 'delete') onDelete(group);
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'rename', child: Text('重命名')),
+                          PopupMenuItem(value: 'delete', child: Text('删除分组')),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  if (groups.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                      child: Text(
+                        '创建分组后，可拖动账号卡片左侧的手柄进行整理。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupDropTile extends StatelessWidget {
+  const _GroupDropTile({
+    required this.label,
+    required this.icon,
+    required this.count,
+    required this.selected,
+    required this.acceptsDrop,
+    required this.isProcessing,
+    required this.onTap,
+    required this.onMoveAccount,
+    this.destinationGroupId,
+    this.trailing,
+    super.key,
+  });
+
+  final String label;
+  final IconData icon;
+  final int count;
+  final bool selected;
+  final bool acceptsDrop;
+  final bool isProcessing;
+  final VoidCallback onTap;
+  final _MoveAccountToGroup onMoveAccount;
+  final String? destinationGroupId;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (_) => acceptsDrop && !isProcessing,
+      onAcceptWithDetails: (details) {
+        onTap();
+        unawaited(onMoveAccount(details.data, destinationGroupId, label));
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isHovering = candidateData.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: isHovering
+                ? Border.all(color: colors.primary, width: 1.5)
+                : null,
+          ),
+          child: Material(
+            color: isHovering
+                ? colors.primaryContainer
+                : selected
+                ? colors.secondaryContainer
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            child: ListTile(
+              dense: true,
+              minLeadingWidth: 22,
+              contentPadding: const EdgeInsets.only(left: 10, right: 4),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              leading: Icon(icon, size: 20),
+              title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: isHovering ? const Text('松开以移动') : null,
+              trailing:
+                  trailing ??
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text('$count'),
+                  ),
+              selected: selected,
+              onTap: onTap,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   const _Header({required this.accountCount, required this.onSearch});
 
@@ -913,124 +1338,221 @@ class _AccountCard extends StatelessWidget {
         ? '${code.substring(0, 4)} ${code.substring(4)}'
         : code;
     final displayIssuer = account.issuer.isEmpty ? '未命名服务' : account.issuer;
+
+    Widget dragHandle() => Draggable<String>(
+      key: ValueKey('account-drag-handle-${account.id}'),
+      data: account.id,
+      rootOverlay: true,
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 280,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: const [
+              BoxShadow(
+                blurRadius: 16,
+                color: Color(0x33000000),
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.drag_indicator_rounded),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$displayIssuer · ${account.accountName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.35,
+        child: Icon(
+          Icons.drag_indicator_rounded,
+          color: colors.onSurfaceVariant,
+        ),
+      ),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: Tooltip(
+          message: '拖动到分组',
+          child: Icon(
+            Icons.drag_indicator_rounded,
+            color: colors.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+
+    Widget avatar() => CircleAvatar(
+      radius: 24,
+      backgroundColor: colors.primaryContainer,
+      child: Text(
+        (displayIssuer.characters.isEmpty
+                ? account.accountName.characters.first
+                : displayIssuer.characters.first)
+            .toUpperCase(),
+        style: TextStyle(
+          color: colors.onPrimaryContainer,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+
+    Widget identity() => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          displayIssuer,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 3),
+        Text(
+          account.accountName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+        ),
+      ],
+    );
+
+    Widget codeButton() => Semantics(
+      label: '验证码 $code',
+      button: true,
+      child: InkWell(
+        onTap: onCopy,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            formattedCode,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontFeatures: const [FontFeature.tabularFigures()],
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    Widget countdown() => SizedBox(
+      width: 40,
+      height: 40,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CircularProgressIndicator(
+            value: remainingSeconds / account.periodSeconds,
+            strokeWidth: 3,
+            backgroundColor: colors.surfaceContainerHighest,
+          ),
+          Text(
+            '$remainingSeconds',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
+    );
+
+    Widget copyButton() => IconButton(
+      tooltip: '复制验证码',
+      onPressed: onCopy,
+      icon: const Icon(Icons.copy_rounded),
+    );
+
+    Widget actionsMenu() => PopupMenuButton<String>(
+      tooltip: '更多操作',
+      onSelected: (value) {
+        if (value == 'edit') onEdit();
+        if (value == 'share') onShare();
+        if (value == 'delete') onDelete();
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(value: 'edit', child: Text('编辑')),
+        PopupMenuItem(
+          value: 'share',
+          child: Row(
+            children: [
+              Icon(Icons.ios_share_rounded),
+              SizedBox(width: 10),
+              Text('分享账号'),
+            ],
+          ),
+        ),
+        PopupMenuDivider(),
+        PopupMenuItem(value: 'delete', child: Text('删除')),
+      ],
+    );
+
     return Card(
       color: colors.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(color: colors.outlineVariant),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: colors.primaryContainer,
-              child: Text(
-                (displayIssuer.characters.isEmpty
-                        ? account.accountName.characters.first
-                        : displayIssuer.characters.first)
-                    .toUpperCase(),
-                style: TextStyle(
-                  color: colors.onPrimaryContainer,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 600) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 10, 14),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    displayIssuer,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    account.accountName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Semantics(
-              label: '验证码 $code',
-              button: true,
-              child: InkWell(
-                onTap: onCopy,
-                borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  child: Text(
-                    formattedCode,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.4,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            SizedBox(
-              width: 40,
-              height: 40,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CircularProgressIndicator(
-                    value: remainingSeconds / account.periodSeconds,
-                    strokeWidth: 3,
-                    backgroundColor: colors.surfaceContainerHighest,
-                  ),
-                  Text(
-                    '$remainingSeconds',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: '复制验证码',
-              onPressed: onCopy,
-              icon: const Icon(Icons.copy_rounded),
-            ),
-            PopupMenuButton<String>(
-              tooltip: '更多操作',
-              onSelected: (value) {
-                if (value == 'edit') onEdit();
-                if (value == 'share') onShare();
-                if (value == 'delete') onDelete();
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'edit', child: Text('编辑')),
-                PopupMenuItem(
-                  value: 'share',
-                  child: Row(
+                  Row(
                     children: [
-                      Icon(Icons.ios_share_rounded),
-                      SizedBox(width: 10),
-                      Text('分享账号'),
+                      dragHandle(),
+                      const SizedBox(width: 8),
+                      avatar(),
+                      const SizedBox(width: 12),
+                      Expanded(child: identity()),
+                      actionsMenu(),
                     ],
                   ),
-                ),
-                PopupMenuDivider(),
-                PopupMenuItem(value: 'delete', child: Text('删除')),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const SizedBox(width: 28),
+                      Expanded(child: codeButton()),
+                      countdown(),
+                      copyButton(),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+            child: Row(
+              children: [
+                dragHandle(),
+                const SizedBox(width: 10),
+                avatar(),
+                const SizedBox(width: 16),
+                Expanded(child: identity()),
+                codeButton(),
+                const SizedBox(width: 14),
+                countdown(),
+                copyButton(),
+                actionsMenu(),
               ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

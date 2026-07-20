@@ -4,18 +4,18 @@
 
 ## 当前状态
 
-项目已完成阶段 1 至阶段 17 的主要开发闭环：本地加密 Vault、账号 CRUD、TOTP、多入口二维码导入、Google Authenticator 迁移二维码批量导入、单账号安全分享、独立 `.gcbak` 加密备份恢复、设备快速解锁、系统事件自动锁定、macOS/Windows 原生系统分享、跨平台 GitHub Actions、摄像头二维码扫描 PoC、依赖供应链审计、个人安装/升级/卸载工具、macOS DMG / Windows Setup EXE 个人安装包，以及 macOS 屏幕录制授权恢复流程。
+项目已完成阶段 1 至阶段 18 的主要开发闭环：本地加密 Vault、账号 CRUD、TOTP、多入口二维码导入、Google Authenticator 迁移二维码批量导入、单账号安全分享、独立 `.gcbak` 加密备份恢复、设备快速解锁、系统事件自动锁定、macOS/Windows 原生系统分享、跨平台 GitHub Actions、摄像头二维码扫描 PoC、依赖供应链审计、个人安装/升级/卸载工具、macOS DMG / Windows Setup EXE 个人安装包，macOS 屏幕录制授权恢复流程，以及本地分组管理与账号拖拽归类。
 
 本项目明确为**个人自用软件**，不计划公开发布、上架应用商店或创建公开 GitHub Release。阶段 15 提供无需管理员权限的用户级安装脚本；阶段 16 在此基础上提供可双击使用的 DMG 和 Setup EXE。安装、升级和卸载默认只处理应用及安装器管理的快捷方式，不删除 Vault、系统安全存储记录或 `.gcbak` 备份。
 
-macOS 构建默认只有 ad hoc 签名，Windows 构建没有 Authenticode 签名；安装脚本和安装包不会移除 `com.apple.quarantine`、绕过 Gatekeeper/SmartScreen，也不等同于可信发布签名。macOS 脚本支持显式指定本机稳定代码签名 identity，以减少升级后 TCC 权限失配；摄像头与其他 Windows 原生能力仍待目标真机人工验收。最新验证结果见 `docs/PHASE17_STATUS.md`。
+macOS 构建默认只有 ad hoc 签名，Windows 构建没有 Authenticode 签名；安装脚本和安装包不会移除 `com.apple.quarantine`、绕过 Gatekeeper/SmartScreen，也不等同于可信发布签名。macOS 脚本支持显式指定本机稳定代码签名 identity，以减少升级后 TCC 权限失配；摄像头与其他 Windows 原生能力仍待目标真机人工验收。最新验证结果见 `docs/PHASE18_STATUS.md`。
 
 详细进度见：
 
 - `docs/PRD.md`
 - `docs/TECHNICAL_DESIGN.md`
 - `docs/PHASE0_STATUS.md`
-- `docs/PHASE1_STATUS.md` 至 `docs/PHASE17_STATUS.md`
+- `docs/PHASE1_STATUS.md` 至 `docs/PHASE18_STATUS.md`
 - `docs/adr/0001-foundation-stack.md`
 
 ## 环境
@@ -105,6 +105,15 @@ bash tool/install_macos.sh --uninstall
 ```
 
 两个脚本都支持自定义源目录、目标目录、dry run 和显式启动参数。升级前必须先退出正在运行的 Google Code。macOS 脚本参数见 `bash tool/install_macos.sh --help`；Windows 参数见 `Get-Help .\tool\install_windows.ps1 -Detailed`。
+
+## 账号分组
+
+解锁后，验证码列表左侧提供“全部账号”“未分组”和自定义分组：
+
+- 点击分组标题旁的按钮可创建分组。
+- 每个自定义分组都可重命名或删除；删除分组只会把账号移到“未分组”，不会删除验证码账号。
+- 从账号卡片左侧的拖拽手柄拖到目标分组，即可立即写入加密 Vault。
+- 分组筛选与搜索可组合使用，分组名称大小写不敏感且不可重复。
 
 ## 屏幕二维码扫描
 

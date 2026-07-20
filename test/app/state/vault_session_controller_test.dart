@@ -141,6 +141,66 @@ void main() {
   });
 
   test(
+    'creates, renames, assigns, and deletes account groups atomically',
+    () async {
+      final repository = _FakeVaultRepository();
+      final container = ProviderContainer(
+        overrides: [vaultRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(vaultSessionProvider.notifier);
+      await controller.initialize();
+      await controller.createVault('password123', 'password123');
+
+      const draft = AccountDraft(
+        issuer: 'Example',
+        accountName: 'alice@example.com',
+        secret: 'JBSWY3DPEHPK3PXP',
+        algorithm: TotpAlgorithm.sha1,
+        digits: 6,
+        periodSeconds: 30,
+      );
+      expect(await controller.addAccount(draft), isTrue);
+      final accountId = container
+          .read(vaultSessionProvider)
+          .payload!
+          .accounts
+          .single
+          .id;
+
+      expect(await controller.createGroup(' Work '), isTrue);
+      var payload = container.read(vaultSessionProvider).payload!;
+      expect(payload.groups, hasLength(1));
+      expect(payload.groups.single['name'], 'Work');
+      final groupId = payload.groups.single['id']! as String;
+
+      expect(await controller.createGroup('work'), isFalse);
+      expect(container.read(vaultSessionProvider).message, '该分组名称已经存在');
+      expect(await controller.renameGroup(groupId, 'Servers'), isTrue);
+      expect(
+        container.read(vaultSessionProvider).payload!.groups.single['name'],
+        'Servers',
+      );
+
+      expect(
+        await controller.moveAccountToGroup(accountId, 'missing'),
+        isFalse,
+      );
+      expect(container.read(vaultSessionProvider).message, '目标分组不存在');
+      expect(await controller.moveAccountToGroup(accountId, groupId), isTrue);
+      payload = container.read(vaultSessionProvider).payload!;
+      expect(payload.accounts.single.groupId, groupId);
+
+      expect(await controller.deleteGroup(groupId), isTrue);
+      payload = container.read(vaultSessionProvider).payload!;
+      expect(payload.groups, isEmpty);
+      expect(payload.accounts, hasLength(1));
+      expect(payload.accounts.single.groupId, isNull);
+      expect(repository.saveCount, 5);
+    },
+  );
+
+  test(
     'reauthenticates only while unlocked and preserves session data',
     () async {
       final repository = _FakeVaultRepository();
