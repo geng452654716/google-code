@@ -119,14 +119,93 @@ void main() {
 
   test('rejects a wrong password', () async {
     final repository = createRepository();
-    await repository.create('password123');
+    final initial = await repository.create('password123');
+    await repository.save(
+      initial.copyWith(updatedAt: DateTime.utc(2026, 7, 16, 15)),
+    );
     repository.lock();
 
     expect(
       repository.unlock('not-the-password'),
-      throwsA(isA<VaultUnlockException>()),
+      throwsA(
+        isA<VaultUnlockException>().having(
+          (error) => error.kind,
+          'kind',
+          VaultUnlockFailureKind.invalidCredential,
+        ),
+      ),
     );
   });
+
+  test(
+    'recovers from authenticated primary corruption through the backup',
+    () async {
+      final repository = createRepository();
+      final initial = await repository.create('password123');
+      final primaryRevision = initial.copyWith(
+        updatedAt: DateTime.utc(2026, 7, 16, 15),
+      );
+      await repository.save(primaryRevision);
+      repository.lock();
+
+      final encoded = await vaultFile.readAsString();
+      final envelope = VaultEnvelope.decode(encoded);
+      final tamperedCipherText = List<int>.from(envelope.payload.cipherText)
+        ..[0] ^= 1;
+      final tampered = VaultEnvelope(
+        version: envelope.version,
+        kdf: envelope.kdf,
+        salt: envelope.salt,
+        wrappedDek: envelope.wrappedDek,
+        payload: VaultCipherBox(
+          nonce: envelope.payload.nonce,
+          cipherText: tamperedCipherText,
+          mac: envelope.payload.mac,
+        ),
+      );
+      await vaultFile.writeAsString(tampered.encode(), flush: true);
+
+      final recoveredRepository = createRepository();
+      final recovered = await recoveredRepository.unlock('password123');
+      expect(recovered.updatedAt, initial.updatedAt);
+
+      final backupBeforeSave = await File(
+        '${vaultFile.path}.bak',
+      ).readAsString();
+      final repaired = recovered.copyWith(
+        updatedAt: DateTime.utc(2026, 7, 16, 16),
+      );
+      await recoveredRepository.save(repaired);
+
+      expect(
+        await File('${vaultFile.path}.bak').readAsString(),
+        backupBeforeSave,
+      );
+      final reopened = await createRepository().unlock('password123');
+      expect(reopened.updatedAt, repaired.updatedAt);
+    },
+  );
+
+  test(
+    'classifies two unreadable Vault copies without guessing password',
+    () async {
+      await vaultFile.writeAsString('{broken', flush: true);
+      await File(
+        '${vaultFile.path}.bak',
+      ).writeAsString('{also-broken', flush: true);
+
+      expect(
+        createRepository().unlock('password123'),
+        throwsA(
+          isA<VaultUnlockException>().having(
+            (error) => error.kind,
+            'kind',
+            VaultUnlockFailureKind.unreadableVault,
+          ),
+        ),
+      );
+    },
+  );
 
   test('rejects saving while locked', () async {
     final repository = createRepository();

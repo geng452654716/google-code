@@ -720,7 +720,7 @@ flowchart LR
 - Windows 使用 Credential Manager 的 `CredWriteW`、`CredReadW` 和 `CredDeleteW`，target 为 `com.gengyujian.google-code.quick-unlock.v1`，类型为 `CRED_TYPE_GENERIC`，持久化范围为 `CRED_PERSIST_LOCAL_MACHINE`。
 - 系统安全存储只保存当前 Vault 的 32 字节 DEK 副本，不保存主密码，也不修改现有 Vault envelope。
 - 主 Vault 始终保留主密码包装后的 DEK，主密码仍是恢复根凭据；`.gcbak` 不包含设备快速解锁材料。
-- 读取时严格校验 32 字节长度。缺失材料安全回退主密码；损坏或过期材料会删除后回退；用户取消设备认证不会删除有效材料。
+- 读取时严格校验 32 字节长度。缺失材料安全回退主密码；认证、格式或 Vault 解密失败均不会自动删除设备材料，因为失败也可能来自 Vault 主文件损坏。只有用户明确禁用快速解锁时才删除；用户取消设备认证同样不会修改材料。
 - Dart 和原生层在可控生命周期结束时尝试覆盖临时密钥字节，但不对垃圾回收语言的物理清零作绝对承诺。
 
 ### 14.3 设备认证与快速解锁
@@ -736,6 +736,14 @@ flowchart LR
 5. 下次启动时完成设备认证，读取 DEK，并使用现有 AES-GCM payload ciphertext 与 AAD 认证解密 Vault。
 6. 用户可随时禁用快速解锁，只删除设备安全存储材料，不锁定或重写主 Vault。
 7. 分享 Secret、URI 或二维码前，如果快速解锁已配置，可用设备认证重新验证；主密码重新认证始终保留为安全回退。
+
+### 14.3.1 Vault 双副本恢复
+
+- 解锁依次验证 `vault.gcvault` 与 `vault.gcvault.bak`，而不是只在主文件 JSON malformed 时回退。
+- 密码解锁把 wrapped DEK 认证失败分类为 `invalidCredential`，把 DEK 已解包但 payload AES-GCM/JSON/schema 失败分类为 `corruptedPayload`。
+- 快速解锁同样尝试两份文件；两份均失败时保留 Keychain/Credential Manager DEK，避免把仍可能用于恢复 `.bak` 的唯一无密码凭据永久删除。
+- 如果从 `.bak` 打开，会话标记为 recovery 状态。首次保存使用 `writeRecovered` 直接原子替换主文件，不把失败的主文件旋转覆盖到 `.bak`。
+- 若两份 wrapped DEK 都无法认证，密码错误与 wrapped DEK 密文本身损坏在密码学上不可区分，UI 不宣称能够绝对判断。
 
 Windows Hello 可能通过 PIN 等设备凭据完成认证，UI 统一使用“Windows Hello”，不宣称一定是指纹。macOS 使用“Touch ID 或设备密码”。
 

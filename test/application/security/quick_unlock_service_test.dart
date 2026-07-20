@@ -79,15 +79,15 @@ void main() {
     },
   );
 
-  test('invalid or stale DEK is deleted and falls back safely', () async {
+  test('invalid or stale DEK is preserved for recovery', () async {
     keyStore.stored = Uint8List(32)..fillRange(0, 32, 9);
     repository.rejectQuickUnlock = true;
 
     final attempt = await service.unlock();
 
     expect(attempt.status, QuickUnlockAttemptStatus.invalidKey);
-    expect(keyStore.deleteCount, 1);
-    expect(keyStore.stored, isNull);
+    expect(keyStore.deleteCount, 0);
+    expect(keyStore.stored, isNotNull);
   });
 
   test('sensitive reauthentication requires configured quick unlock', () async {

@@ -75,23 +75,38 @@ class VaultCryptoService {
   /// Unlocks and authenticates an envelope while retaining its DEK in memory.
   Future<OpenedVault> open(VaultEnvelope envelope, String password) async {
     _validatePassword(password);
+    late final List<int> dekBytes;
     try {
       final keyEncryptionKey = await _deriveKey(
         password,
         envelope.salt,
         envelope.kdf,
       );
-      final dekBytes = await _cipher.decrypt(
+      dekBytes = await _cipher.decrypt(
         envelope.wrappedDek.toSecretBox(),
         secretKey: keyEncryptionKey,
         aad: _wrapAad,
       );
+    } on SecretBoxAuthenticationError catch (_) {
+      throw const VaultUnlockException(
+        'Master password or wrapped Vault key is invalid.',
+        VaultUnlockFailureKind.invalidCredential,
+      );
+    }
+
+    try {
       final dataEncryptionKey = SecretKey(dekBytes);
       return await _openPayload(envelope, dataEncryptionKey);
     } on SecretBoxAuthenticationError catch (_) {
-      throw const VaultUnlockException();
+      throw const VaultUnlockException(
+        'Vault payload authentication failed.',
+        VaultUnlockFailureKind.corruptedPayload,
+      );
     } on FormatException catch (_) {
-      throw const VaultUnlockException('Vault payload is invalid.');
+      throw const VaultUnlockException(
+        'Vault payload is invalid.',
+        VaultUnlockFailureKind.corruptedPayload,
+      );
     }
   }
 
@@ -110,9 +125,15 @@ class VaultCryptoService {
       final dataEncryptionKey = SecretKey(dataEncryptionKeyBytes);
       return await _openPayload(envelope, dataEncryptionKey);
     } on SecretBoxAuthenticationError catch (_) {
-      throw const VaultUnlockException();
+      throw const VaultUnlockException(
+        'Quick unlock key or Vault payload is invalid.',
+        VaultUnlockFailureKind.invalidCredential,
+      );
     } on FormatException catch (_) {
-      throw const VaultUnlockException('Vault payload is invalid.');
+      throw const VaultUnlockException(
+        'Vault payload is invalid.',
+        VaultUnlockFailureKind.corruptedPayload,
+      );
     }
   }
 
@@ -202,7 +223,10 @@ class VaultCryptoService {
 
   void _validatePassword(String password) {
     if (password.isEmpty) {
-      throw const VaultUnlockException('Master password must not be empty.');
+      throw const VaultUnlockException(
+        'Master password must not be empty.',
+        VaultUnlockFailureKind.invalidCredential,
+      );
     }
   }
 }

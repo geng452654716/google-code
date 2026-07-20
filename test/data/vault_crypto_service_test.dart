@@ -31,7 +31,7 @@ void main() {
     expect(envelope.encode(), isNot(contains('JBSWY3DPEHPK3PXP')));
   });
 
-  test('rejects a wrong password and tampered ciphertext', () async {
+  test('classifies a wrong password and tampered payload separately', () async {
     final service = VaultCryptoService();
     final envelope = await service.create(
       {'accounts': <Object>[]},
@@ -40,7 +40,13 @@ void main() {
     );
     expect(
       service.decrypt(envelope, 'wrong'),
-      throwsA(isA<VaultUnlockException>()),
+      throwsA(
+        isA<VaultUnlockException>().having(
+          (error) => error.kind,
+          'kind',
+          VaultUnlockFailureKind.invalidCredential,
+        ),
+      ),
     );
 
     final json = jsonDecode(envelope.encode()) as Map<String, Object?>;
@@ -51,7 +57,13 @@ void main() {
     final tampered = VaultEnvelope.decode(jsonEncode(json));
     expect(
       service.decrypt(tampered, 'right'),
-      throwsA(isA<VaultUnlockException>()),
+      throwsA(
+        isA<VaultUnlockException>().having(
+          (error) => error.kind,
+          'kind',
+          VaultUnlockFailureKind.corruptedPayload,
+        ),
+      ),
     );
   });
 

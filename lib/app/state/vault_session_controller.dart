@@ -93,10 +93,18 @@ class VaultSessionController extends Notifier<VaultSessionState> {
         payload: payload,
       );
       return true;
-    } on VaultUnlockException {
+    } on VaultUnlockException catch (error) {
       state = state.copyWith(
         isProcessing: false,
-        message: '主密码错误，或 Vault 数据已损坏。',
+        message: switch (error.kind) {
+          VaultUnlockFailureKind.invalidCredential =>
+            '主密码不正确，或密钥包装数据已损坏。请检查输入后重试。',
+          VaultUnlockFailureKind.corruptedPayload =>
+            '主密码已通过验证，但 Vault 主文件和自动备份的数据均无法恢复。',
+          VaultUnlockFailureKind.unreadableVault =>
+            'Vault 主文件和自动备份均无法读取，请保留文件并进行恢复。',
+          VaultUnlockFailureKind.unknown => '解锁失败，请保留 Vault 文件并重试。',
+        },
       );
       return false;
     } on Object {
@@ -124,7 +132,8 @@ class VaultSessionController extends Notifier<VaultSessionState> {
         QuickUnlockAttemptStatus.cancelled => null,
         QuickUnlockAttemptStatus.notConfigured => '快速解锁尚未启用，请输入主密码。',
         QuickUnlockAttemptStatus.unavailable => '设备认证当前不可用，请输入主密码。',
-        QuickUnlockAttemptStatus.invalidKey => '快速解锁材料已失效，请使用主密码解锁后重新启用。',
+        QuickUnlockAttemptStatus.invalidKey =>
+          '快速解锁无法打开 Vault；设备密钥已保留，请不要重置数据。',
         QuickUnlockAttemptStatus.failed => '快速解锁失败，请输入主密码。',
         QuickUnlockAttemptStatus.success => null,
       },

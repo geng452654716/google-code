@@ -280,7 +280,7 @@ void main() {
     final state = container.read(vaultSessionProvider);
     expect(state.phase, VaultSessionPhase.locked);
     expect(state.payload, isNull);
-    expect(state.message, '主密码错误，或 Vault 数据已损坏。');
+    expect(state.message, '主密码不正确，或密钥包装数据已损坏。请检查输入后重试。');
   });
 }
 
@@ -315,7 +315,10 @@ class _FakeVaultRepository implements VaultRepository {
   @override
   Future<VaultPayload> unlock(String password) async {
     if (password != this.password || storedPayload == null) {
-      throw const VaultUnlockException();
+      throw const VaultUnlockException(
+        'Invalid credential.',
+        VaultUnlockFailureKind.invalidCredential,
+      );
     }
     isLocked = false;
     return storedPayload!;

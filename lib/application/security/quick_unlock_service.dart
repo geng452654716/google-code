@@ -136,10 +136,12 @@ class QuickUnlockService {
         payload: payload,
       );
     } on VaultUnlockException {
-      await _deleteKeySafely();
+      // A Vault failure may be caused by damaged encrypted data rather than a
+      // stale device key. Keep the only password-independent recovery material.
       return const QuickUnlockAttempt(QuickUnlockAttemptStatus.invalidKey);
     } on FormatException {
-      await _deleteKeySafely();
+      // Automatic deletion is irreversible; only explicit disable may remove
+      // device recovery material.
       return const QuickUnlockAttempt(QuickUnlockAttemptStatus.invalidKey);
     } on Object {
       return const QuickUnlockAttempt(QuickUnlockAttemptStatus.failed);
@@ -181,14 +183,6 @@ class QuickUnlockService {
       return await keyStore.containsQuickUnlockKey();
     } on Object {
       return false;
-    }
-  }
-
-  Future<void> _deleteKeySafely() async {
-    try {
-      await keyStore.deleteQuickUnlockKey();
-    } on Object {
-      // A stale key must not prevent the safe master-password fallback.
     }
   }
 

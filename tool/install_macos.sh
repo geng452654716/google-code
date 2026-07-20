@@ -219,6 +219,16 @@ if [[ -n "$codesign_identity" ]]; then
     --preserve-metadata=identifier,entitlements \
     --sign "$codesign_identity" \
     "$staging_app"
+else
+  # Flutter may update App.framework after the outer ad hoc seal is produced.
+  # Re-sign only the staged copy, then require strict verification below.
+  codesign \
+    --force \
+    --deep \
+    --timestamp=none \
+    --preserve-metadata=identifier,entitlements \
+    --sign - \
+    "$staging_app"
 fi
 codesign --verify --deep --strict "$staging_app"
 

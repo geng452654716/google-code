@@ -20,6 +20,7 @@ class LocalVaultRepository implements VaultRepository {
 
   VaultFileStore? _store;
   OpenedVault? _openedVault;
+  bool _openedFromBackup = false;
 
   Future<VaultFileStore> _resolveStore() async {
     return _store ??= VaultFileStore(await _fileResolver());
@@ -47,6 +48,7 @@ class LocalVaultRepository implements VaultRepository {
     );
     await store.write(openedVault.envelope);
     _openedVault = openedVault;
+    _openedFromBackup = false;
     return payload;
   }
 
@@ -56,10 +58,13 @@ class LocalVaultRepository implements VaultRepository {
     if (!await store.exists()) {
       throw const VaultUnlockException('Vault does not exist.');
     }
-    final openedVault = await _cryptoService.open(await store.read(), password);
-    final payload = VaultPayload.fromJson(openedVault.payload);
-    _openedVault = openedVault;
-    return payload;
+    final result = await _openAvailableCopies(
+      store,
+      (envelope) => _cryptoService.open(envelope, password),
+    );
+    _openedVault = result.openedVault;
+    _openedFromBackup = result.fromBackup;
+    return result.payload;
   }
 
   @override
@@ -68,13 +73,14 @@ class LocalVaultRepository implements VaultRepository {
     if (!await store.exists()) {
       throw const VaultUnlockException('Vault does not exist.');
     }
-    final openedVault = await _cryptoService.openWithDataEncryptionKey(
-      await store.read(),
-      keyBytes,
+    final result = await _openAvailableCopies(
+      store,
+      (envelope) =>
+          _cryptoService.openWithDataEncryptionKey(envelope, keyBytes),
     );
-    final payload = VaultPayload.fromJson(openedVault.payload);
-    _openedVault = openedVault;
-    return payload;
+    _openedVault = result.openedVault;
+    _openedFromBackup = result.fromBackup;
+    return result.payload;
   }
 
   @override
@@ -95,7 +101,10 @@ class LocalVaultRepository implements VaultRepository {
     final store = await _resolveStore();
     if (!await store.exists()) return false;
     try {
-      await _cryptoService.open(await store.read(), password);
+      await _openAvailableCopies(
+        store,
+        (envelope) => _cryptoService.open(envelope, password),
+      );
       return true;
     } on VaultUnlockException {
       return false;
@@ -112,12 +121,132 @@ class LocalVaultRepository implements VaultRepository {
       current,
       payload.toJson(),
     );
-    await (await _resolveStore()).write(updated.envelope);
+    final store = await _resolveStore();
+    if (_openedFromBackup) {
+      await store.writeRecovered(updated.envelope);
+    } else {
+      await store.write(updated.envelope);
+    }
     _openedVault = updated;
+    _openedFromBackup = false;
   }
 
   @override
   void lock() {
     _openedVault = null;
+    _openedFromBackup = false;
   }
+
+  Future<_OpenedVaultResult> _openAvailableCopies(
+    VaultFileStore store,
+    Future<OpenedVault> Function(VaultEnvelope envelope) opener,
+  ) async {
+    final failures = <VaultUnlockException>[];
+
+    if (await store.primaryExists()) {
+      final result = await _tryOpenCopy(
+        read: store.readPrimary,
+        opener: opener,
+        fromBackup: false,
+        failures: failures,
+      );
+      if (result != null) return result;
+    }
+
+    if (await store.backupExists()) {
+      final result = await _tryOpenCopy(
+        read: store.readBackup,
+        opener: opener,
+        fromBackup: true,
+        failures: failures,
+      );
+      if (result != null) return result;
+    }
+
+    if (failures.any(
+      (failure) => failure.kind == VaultUnlockFailureKind.corruptedPayload,
+    )) {
+      throw const VaultUnlockException(
+        'The Vault key was accepted, but every available payload is invalid.',
+        VaultUnlockFailureKind.corruptedPayload,
+      );
+    }
+    if (failures.any(
+      (failure) => failure.kind == VaultUnlockFailureKind.invalidCredential,
+    )) {
+      throw const VaultUnlockException(
+        'The credential could not unlock any available Vault copy.',
+        VaultUnlockFailureKind.invalidCredential,
+      );
+    }
+    throw const VaultUnlockException(
+      'No readable Vault copy is available.',
+      VaultUnlockFailureKind.unreadableVault,
+    );
+  }
+
+  Future<_OpenedVaultResult?> _tryOpenCopy({
+    required Future<VaultEnvelope> Function() read,
+    required Future<OpenedVault> Function(VaultEnvelope envelope) opener,
+    required bool fromBackup,
+    required List<VaultUnlockException> failures,
+  }) async {
+    late final VaultEnvelope envelope;
+    try {
+      envelope = await read();
+    } on Object {
+      failures.add(
+        const VaultUnlockException(
+          'Vault envelope is unreadable.',
+          VaultUnlockFailureKind.unreadableVault,
+        ),
+      );
+      return null;
+    }
+
+    late final OpenedVault openedVault;
+    try {
+      openedVault = await opener(envelope);
+    } on VaultUnlockException catch (error) {
+      failures.add(error);
+      return null;
+    } on Object {
+      failures.add(
+        const VaultUnlockException(
+          'Vault could not be opened.',
+          VaultUnlockFailureKind.unreadableVault,
+        ),
+      );
+      return null;
+    }
+
+    try {
+      final payload = VaultPayload.fromJson(openedVault.payload);
+      return _OpenedVaultResult(
+        openedVault: openedVault,
+        payload: payload,
+        fromBackup: fromBackup,
+      );
+    } on Object {
+      failures.add(
+        const VaultUnlockException(
+          'Vault payload schema is invalid.',
+          VaultUnlockFailureKind.corruptedPayload,
+        ),
+      );
+      return null;
+    }
+  }
+}
+
+class _OpenedVaultResult {
+  const _OpenedVaultResult({
+    required this.openedVault,
+    required this.payload,
+    required this.fromBackup,
+  });
+
+  final OpenedVault openedVault;
+  final VaultPayload payload;
+  final bool fromBackup;
 }
