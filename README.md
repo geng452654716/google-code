@@ -125,9 +125,17 @@ bash tool/install_macos.sh --uninstall
 
 - 本地 Vault 每次更新会保留前一版本为同目录下的 `vault.gcvault.bak`。
 - 解锁时会分别验证主文件与自动备份；主文件损坏但备份有效时可直接进入，后续保存会修复主文件且不会用损坏文件覆盖良好备份。
-- “主密码不正确”与“主密码验证通过但 payload 损坏”使用不同提示，但 AES-GCM 无法区分错误密码和已损坏的 wrapped key，因此前一种提示仍保留这两种可能性。
+- 解锁提示进一步区分 wrapped DEK 认证失败、payload AES-GCM 认证失败、已认证正文 JSON 无效和 payload schema 不兼容；AES-GCM 无法区分错误密码和已损坏的 wrapped key，因此密码错误提示仍保留这两种可能性。
+- schema-v1 兼容恢复允许早期可选字段缺失、旧 `period` 字段和数字字符串；账号引用不存在的分组时回退到“未分组”，不会删除账号。
+- 当前 payload AAD 失败时只尝试有限的历史候选，并且每个候选仍必须通过 AES-GCM MAC；应用不会进行未认证解密或输出明文诊断。
 - 快速解锁失败不再自动删除 Keychain/Credential Manager 中的设备 DEK；只有用户在安全设置中明确禁用时才删除。
 - 忘记主密码且设备快速解锁材料已经缺失时，应用无法绕过加密恢复 Secret；请保留主文件、`.bak` 和所有 `.gcbak`，不要重置 Vault。
+
+## 阶段 19 Vault 恢复摘要
+
+- 主密码正确后的失败已细分到 AES-GCM 正文认证、JSON 和 schema 三层。
+- 增加受认证的历史 AAD 尝试与早期 schema-v1 兼容解析，不降低密码学校验。
+- 完整实现与测试见 `docs/PHASE19_STATUS.md`。
 
 ## 阶段 18 验证摘要
 

@@ -207,6 +207,74 @@ void main() {
     },
   );
 
+  test(
+    'opens an early schema-v1 payload and preserves every account',
+    () async {
+      final service = VaultCryptoService();
+      final envelope = await service.create(
+        {
+          'schemaVersion': 1,
+          'accounts': [
+            {
+              'id': 'legacy-account',
+              'issuer': 'Legacy',
+              'accountName': 'legacy@example.com',
+              'secret': 'JBSWY3DPEHPK3PXP',
+              'algorithm': 'SHA1',
+              'digits': 6.0,
+              'period': 30,
+            },
+          ],
+        },
+        'password123',
+        kdf: fastKdf,
+      );
+      await vaultFile.writeAsString(envelope.encode(), flush: true);
+
+      final restored = await createRepository().unlock('password123');
+
+      expect(restored.accounts, hasLength(1));
+      expect(restored.accounts.single.id, 'legacy-account');
+      expect(restored.accounts.single.periodSeconds, 30);
+    },
+  );
+
+  test(
+    'classifies authenticated incompatible schema without leaking data',
+    () async {
+      const secret = 'JBSWY3DPEHPK3PXP';
+      final service = VaultCryptoService();
+      final envelope = await service.create(
+        {
+          'schemaVersion': 1,
+          'accounts': [
+            {'id': 'broken', 'secret': secret},
+          ],
+        },
+        'password123',
+        kdf: fastKdf,
+      );
+      await vaultFile.writeAsString(envelope.encode(), flush: true);
+
+      await expectLater(
+        createRepository().unlock('password123'),
+        throwsA(
+          isA<VaultUnlockException>()
+              .having(
+                (error) => error.kind,
+                'kind',
+                VaultUnlockFailureKind.payloadSchemaIncompatible,
+              )
+              .having(
+                (error) => error.toString(),
+                'secret redaction',
+                isNot(contains(secret)),
+              ),
+        ),
+      );
+    },
+  );
+
   test('rejects saving while locked', () async {
     final repository = createRepository();
     final payload = await repository.create('password123');

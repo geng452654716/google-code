@@ -26,6 +26,12 @@ class VaultCryptoService {
 
   static final _wrapAad = utf8.encode('google-code:v1:wrapped-dek');
   static final _payloadAad = utf8.encode('google-code:v1:payload');
+  static final _legacyPayloadAads = <List<int>>[
+    const <int>[],
+    utf8.encode('google-code:v1:wrapped-dek'),
+    utf8.encode('google-code-backup:payload:v1'),
+    utf8.encode('google-code-vault:v1:payload'),
+  ];
 
   final AesGcm _cipher;
 
@@ -94,20 +100,11 @@ class VaultCryptoService {
       );
     }
 
-    try {
-      final dataEncryptionKey = SecretKey(dekBytes);
-      return await _openPayload(envelope, dataEncryptionKey);
-    } on SecretBoxAuthenticationError catch (_) {
-      throw const VaultUnlockException(
-        'Vault payload authentication failed.',
-        VaultUnlockFailureKind.corruptedPayload,
-      );
-    } on FormatException catch (_) {
-      throw const VaultUnlockException(
-        'Vault payload is invalid.',
-        VaultUnlockFailureKind.corruptedPayload,
-      );
-    }
+    final dataEncryptionKey = SecretKey(dekBytes);
+    return _openPayloadWithCompatibleAuthentication(
+      envelope,
+      dataEncryptionKey,
+    );
   }
 
   /// Opens an envelope with a previously device-protected DEK copy.
@@ -121,20 +118,11 @@ class VaultCryptoService {
     if (dataEncryptionKeyBytes.length != 32) {
       throw const VaultUnlockException('Quick unlock key is invalid.');
     }
-    try {
-      final dataEncryptionKey = SecretKey(dataEncryptionKeyBytes);
-      return await _openPayload(envelope, dataEncryptionKey);
-    } on SecretBoxAuthenticationError catch (_) {
-      throw const VaultUnlockException(
-        'Quick unlock key or Vault payload is invalid.',
-        VaultUnlockFailureKind.invalidCredential,
-      );
-    } on FormatException catch (_) {
-      throw const VaultUnlockException(
-        'Vault payload is invalid.',
-        VaultUnlockFailureKind.corruptedPayload,
-      );
-    }
+    final dataEncryptionKey = SecretKey(dataEncryptionKeyBytes);
+    return _openPayloadWithCompatibleAuthentication(
+      envelope,
+      dataEncryptionKey,
+    );
   }
 
   /// Re-encrypts an updated payload with the active DEK and a fresh nonce.
@@ -168,24 +156,62 @@ class VaultCryptoService {
     return (await open(envelope, password)).payload;
   }
 
-  Future<OpenedVault> _openPayload(
+  Future<OpenedVault> _openPayloadWithCompatibleAuthentication(
     VaultEnvelope envelope,
     SecretKey dataEncryptionKey,
   ) async {
-    final clearBytes = await _cipher.decrypt(
-      envelope.payload.toSecretBox(),
-      secretKey: dataEncryptionKey,
-      aad: _payloadAad,
-    );
-    final decoded = jsonDecode(utf8.decode(clearBytes));
-    if (decoded is! Map<String, Object?>) {
-      throw const FormatException('Vault payload must be an object.');
+    final aadCandidates = <List<int>>[_payloadAad, ..._legacyPayloadAads];
+    for (final aad in aadCandidates) {
+      late final List<int> clearBytes;
+      try {
+        clearBytes = await _cipher.decrypt(
+          envelope.payload.toSecretBox(),
+          secretKey: dataEncryptionKey,
+          aad: aad,
+        );
+      } on SecretBoxAuthenticationError {
+        continue;
+      }
+
+      return _decodeAuthenticatedPayload(
+        envelope,
+        dataEncryptionKey,
+        clearBytes,
+      );
     }
-    return OpenedVault(
-      envelope: envelope,
-      dataEncryptionKey: dataEncryptionKey,
-      payload: decoded,
+
+    throw const VaultUnlockException(
+      'Vault payload authentication failed for every supported format.',
+      VaultUnlockFailureKind.payloadAuthenticationFailed,
     );
+  }
+
+  OpenedVault _decodeAuthenticatedPayload(
+    VaultEnvelope envelope,
+    SecretKey dataEncryptionKey,
+    List<int> clearBytes,
+  ) {
+    try {
+      final decoded = jsonDecode(utf8.decode(clearBytes));
+      if (decoded is! Map) {
+        throw const FormatException('Vault payload must be an object.');
+      }
+      return OpenedVault(
+        envelope: envelope,
+        dataEncryptionKey: dataEncryptionKey,
+        payload: decoded.cast<String, Object?>(),
+      );
+    } on FormatException {
+      throw const VaultUnlockException(
+        'Authenticated Vault payload is not valid JSON.',
+        VaultUnlockFailureKind.payloadJsonInvalid,
+      );
+    } on TypeError {
+      throw const VaultUnlockException(
+        'Authenticated Vault payload JSON has invalid key types.',
+        VaultUnlockFailureKind.payloadJsonInvalid,
+      );
+    }
   }
 
   Future<SecretBox> _encryptPayload(

@@ -40,6 +40,52 @@ void main() {
     expect(restored.accounts.single.lastUsedAt, updatedAt);
   });
 
+  test('restores early schema-v1 defaults without dropping accounts', () {
+    final restored = VaultPayload.fromJson({
+      'schemaVersion': '1',
+      'accounts': [
+        {
+          'id': 'legacy-account',
+          'accountName': 'legacy@example.com',
+          'secret': 'JBSWY3DPEHPK3PXP',
+          'digits': '6',
+          'period': '30',
+          'groupId': 'missing-group',
+        },
+      ],
+    });
+
+    expect(restored.accounts, hasLength(1));
+    expect(restored.accounts.single.id, 'legacy-account');
+    expect(restored.accounts.single.periodSeconds, 30);
+    expect(restored.accounts.single.algorithm, TotpAlgorithm.sha1);
+    expect(restored.accounts.single.groupId, isNull);
+    expect(restored.groups, isEmpty);
+    expect(restored.preferences, isEmpty);
+    expect(restored.schemaVersion, VaultPayload.currentSchemaVersion);
+  });
+
+  test('reports an account path without including secret values', () {
+    const secret = 'JBSWY3DPEHPK3PXP';
+    expect(
+      () => VaultPayload.fromJson({
+        'schemaVersion': 1,
+        'accounts': [
+          {'id': 'broken', 'secret': secret},
+        ],
+      }),
+      throwsA(
+        isA<FormatException>()
+            .having((error) => error.message, 'path', contains('accounts[0]'))
+            .having(
+              (error) => error.message,
+              'secret redaction',
+              isNot(contains(secret)),
+            ),
+      ),
+    );
+  });
+
   test('rejects an unsupported payload schema', () {
     final json = VaultPayload.empty(DateTime.utc(2026, 7, 16)).toJson();
     json['schemaVersion'] = 99;

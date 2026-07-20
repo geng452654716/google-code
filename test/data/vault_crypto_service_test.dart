@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_code/core/errors/vault_exception.dart';
 import 'package:google_code/data/vault/vault.dart';
@@ -61,7 +62,64 @@ void main() {
         isA<VaultUnlockException>().having(
           (error) => error.kind,
           'kind',
-          VaultUnlockFailureKind.corruptedPayload,
+          VaultUnlockFailureKind.payloadAuthenticationFailed,
+        ),
+      ),
+    );
+  });
+
+  test('recovers a payload encrypted without legacy AAD', () async {
+    final service = VaultCryptoService();
+    final opened = await service.createOpened(
+      {'accounts': <Object>[], 'schemaVersion': 1},
+      'right',
+      kdf: fastKdf,
+    );
+    final legacyBox = await AesGcm.with256bits().encrypt(
+      utf8.encode(jsonEncode(opened.payload)),
+      secretKey: opened.dataEncryptionKey,
+      aad: const <int>[],
+    );
+    final legacyEnvelope = VaultEnvelope(
+      version: opened.envelope.version,
+      kdf: opened.envelope.kdf,
+      salt: opened.envelope.salt,
+      wrappedDek: opened.envelope.wrappedDek,
+      payload: VaultCipherBox.fromSecretBox(legacyBox),
+    );
+
+    final recovered = await service.decrypt(legacyEnvelope, 'right');
+
+    expect(recovered['schemaVersion'], 1);
+  });
+
+  test('classifies authenticated non-JSON payload separately', () async {
+    final service = VaultCryptoService();
+    final opened = await service.createOpened(
+      {'accounts': <Object>[]},
+      'right',
+      kdf: fastKdf,
+    );
+    final invalidJsonBox = await AesGcm.with256bits().encrypt(
+      utf8.encode('not-json'),
+      secretKey: opened.dataEncryptionKey,
+      aad: utf8.encode('google-code:v1:payload'),
+    );
+    final invalidEnvelope = VaultEnvelope(
+      version: opened.envelope.version,
+      kdf: opened.envelope.kdf,
+      salt: opened.envelope.salt,
+      wrappedDek: opened.envelope.wrappedDek,
+      payload: VaultCipherBox.fromSecretBox(invalidJsonBox),
+    );
+
+    expect(
+      service.decrypt(invalidEnvelope, 'right'),
+      throwsA(
+        isA<VaultUnlockException>().having(
+          (error) => error.kind,
+          'kind',
+          VaultUnlockFailureKind.payloadJsonInvalid,
         ),
       ),
     );

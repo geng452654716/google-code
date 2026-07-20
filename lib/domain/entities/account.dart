@@ -87,21 +87,97 @@ class Account {
     'lastUsedAt': lastUsedAt?.toUtc().toIso8601String(),
   };
 
-  factory Account.fromJson(Map<String, Object?> json) => Account(
-    id: json['id'] as String,
-    issuer: json['issuer'] as String? ?? '',
-    accountName: json['accountName'] as String,
-    secret: json['secret'] as String,
-    algorithm: TotpAlgorithm.parse(json['algorithm'] as String?),
-    digits: json['digits'] as int,
-    periodSeconds: json['periodSeconds'] as int,
-    groupId: json['groupId'] as String?,
-    sortOrder: json['sortOrder'] as int? ?? 0,
-    isPinned: json['isPinned'] as bool? ?? false,
-    createdAt: DateTime.parse(json['createdAt'] as String).toUtc(),
-    updatedAt: DateTime.parse(json['updatedAt'] as String).toUtc(),
-    lastUsedAt: json['lastUsedAt'] == null
-        ? null
-        : DateTime.parse(json['lastUsedAt'] as String).toUtc(),
-  );
+  /// Restores both current schema-v1 accounts and early schema-v1 records that
+  /// omitted optional presentation fields. Required identity and secret fields
+  /// remain strict so recovery never silently drops or invents an account.
+  factory Account.fromJson(
+    Map<String, Object?> json, {
+    int fallbackSortOrder = 0,
+    DateTime? fallbackCreatedAt,
+    DateTime? fallbackUpdatedAt,
+  }) {
+    final createdAt = _dateTimeField(json, 'createdAt') ?? fallbackCreatedAt;
+    final updatedAt =
+        _dateTimeField(json, 'updatedAt') ?? fallbackUpdatedAt ?? createdAt;
+    if (createdAt == null) {
+      throw const FormatException('Account field createdAt is missing.');
+    }
+    if (updatedAt == null) {
+      throw const FormatException('Account field updatedAt is missing.');
+    }
+
+    final periodSeconds = json.containsKey('periodSeconds')
+        ? _intField(json, 'periodSeconds')
+        : _intField(json, 'period');
+    final algorithmName = _stringField(json, 'algorithm');
+
+    return Account(
+      id: _requiredString(json, 'id'),
+      issuer: _stringField(json, 'issuer') ?? '',
+      accountName: _requiredString(json, 'accountName'),
+      secret: _requiredString(json, 'secret'),
+      algorithm: TotpAlgorithm.parse(algorithmName),
+      digits: _intField(json, 'digits') ?? 6,
+      periodSeconds: periodSeconds ?? 30,
+      groupId: json['groupId'] is String ? json['groupId']! as String : null,
+      sortOrder: _intField(json, 'sortOrder') ?? fallbackSortOrder,
+      isPinned: _boolField(json, 'isPinned') ?? false,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      lastUsedAt: _dateTimeField(json, 'lastUsedAt'),
+    );
+  }
+}
+
+String _requiredString(Map<String, Object?> json, String key) {
+  final value = _stringField(json, key);
+  if (value == null || value.isEmpty) {
+    throw FormatException('Account field $key is missing.');
+  }
+  return value;
+}
+
+String? _stringField(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is String) return value;
+  throw FormatException('Account field $key has an invalid type.');
+}
+
+int? _intField(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num && value.isFinite && value == value.roundToDouble()) {
+    return value.toInt();
+  }
+  if (value is String) {
+    final parsed = int.tryParse(value);
+    if (parsed != null) return parsed;
+  }
+  throw FormatException('Account field $key has an invalid integer value.');
+}
+
+bool? _boolField(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num && value == 1) return true;
+  if (value is num && value == 0) return false;
+  if (value is String && value.toLowerCase() == 'true') return true;
+  if (value is String && value.toLowerCase() == 'false') return false;
+  throw FormatException('Account field $key has an invalid boolean value.');
+}
+
+DateTime? _dateTimeField(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is String) {
+    final parsed = DateTime.tryParse(value)?.toUtc();
+    if (parsed != null) return parsed;
+  }
+  if (value is int) {
+    return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+  }
+  throw FormatException('Account field $key has an invalid timestamp.');
 }

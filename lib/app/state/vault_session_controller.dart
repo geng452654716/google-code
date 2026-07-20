@@ -99,6 +99,12 @@ class VaultSessionController extends Notifier<VaultSessionState> {
         message: switch (error.kind) {
           VaultUnlockFailureKind.invalidCredential =>
             '主密码不正确，或密钥包装数据已损坏。请检查输入后重试。',
+          VaultUnlockFailureKind.payloadAuthenticationFailed =>
+            '主密码正确，但 Vault 正文的加密认证失败。主文件和自动备份均未通过安全恢复校验。',
+          VaultUnlockFailureKind.payloadJsonInvalid =>
+            '主密码正确，Vault 正文也通过了加密认证，但解密后的数据格式不是有效 JSON。',
+          VaultUnlockFailureKind.payloadSchemaIncompatible =>
+            '主密码正确且 Vault 已安全解密，但数据结构与当前版本不兼容。请保留文件等待兼容恢复。',
           VaultUnlockFailureKind.corruptedPayload =>
             '主密码已通过验证，但 Vault 主文件和自动备份的数据均无法恢复。',
           VaultUnlockFailureKind.unreadableVault =>

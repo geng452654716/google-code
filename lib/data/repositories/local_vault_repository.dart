@@ -163,13 +163,18 @@ class LocalVaultRepository implements VaultRepository {
       if (result != null) return result;
     }
 
-    if (failures.any(
-      (failure) => failure.kind == VaultUnlockFailureKind.corruptedPayload,
-    )) {
-      throw const VaultUnlockException(
-        'The Vault key was accepted, but every available payload is invalid.',
-        VaultUnlockFailureKind.corruptedPayload,
-      );
+    for (final kind in const [
+      VaultUnlockFailureKind.payloadSchemaIncompatible,
+      VaultUnlockFailureKind.payloadJsonInvalid,
+      VaultUnlockFailureKind.payloadAuthenticationFailed,
+      VaultUnlockFailureKind.corruptedPayload,
+    ]) {
+      if (failures.any((failure) => failure.kind == kind)) {
+        throw VaultUnlockException(
+          'The Vault key was accepted, but every available payload failed.',
+          kind,
+        );
+      }
     }
     if (failures.any(
       (failure) => failure.kind == VaultUnlockFailureKind.invalidCredential,
@@ -230,8 +235,8 @@ class LocalVaultRepository implements VaultRepository {
     } on Object {
       failures.add(
         const VaultUnlockException(
-          'Vault payload schema is invalid.',
-          VaultUnlockFailureKind.corruptedPayload,
+          'Vault payload schema is incompatible.',
+          VaultUnlockFailureKind.payloadSchemaIncompatible,
         ),
       );
       return null;
