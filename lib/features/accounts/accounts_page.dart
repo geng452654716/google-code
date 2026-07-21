@@ -20,6 +20,7 @@ import 'google_migration_import_dialog.dart';
 import '../backup/backup_center_dialog.dart';
 import '../backup/backup_export_dialog.dart';
 import '../backup/backup_restore_dialog.dart';
+import '../backup/cloud_backup_dialog.dart';
 import '../security/security_settings_dialog.dart';
 
 enum _ScreenCapturePermissionAction { cancel, openSettings, restart }
@@ -355,6 +356,18 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
           context: context,
           barrierDismissible: false,
           builder: (_) => const BackupRestoreDialog(),
+        );
+      case BackupCenterAction.cloud:
+        final result = await showDialog<CloudBackupDialogResult>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const CloudBackupDialog(),
+        );
+        if (!mounted || result == null) return;
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => BackupRestoreDialog(initialBackup: result.backup),
         );
     }
   }

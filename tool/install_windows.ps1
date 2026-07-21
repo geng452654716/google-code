@@ -138,10 +138,14 @@ if (-not $SkipBuild) {
         Push-Location $RepositoryRoot
         try {
             $LASTEXITCODE = 0
+            $FlutterBuildArguments = @('build', 'windows', '--release')
+            if (-not [string]::IsNullOrWhiteSpace($env:TOTP_VAULT_GITHUB_CLIENT_ID)) {
+                $FlutterBuildArguments += "--dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=$($env:TOTP_VAULT_GITHUB_CLIENT_ID)"
+            }
             if (Get-Command 'fvm' -ErrorAction SilentlyContinue) {
-                & fvm flutter build windows --release
+                & fvm flutter @FlutterBuildArguments
             } elseif (Get-Command 'flutter' -ErrorAction SilentlyContinue) {
-                & flutter build windows --release
+                & flutter @FlutterBuildArguments
             } else {
                 throw 'Neither fvm nor flutter is available. Install Flutter or use -SkipBuild.'
             }

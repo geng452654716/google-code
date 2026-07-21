@@ -63,7 +63,7 @@ jobs:
         run: flutter pub get
 
       - name: Build macOS unsigned release
-        run: flutter build macos --release
+        run: flutter build macos --release --dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=${{ vars.TOTP_VAULT_GITHUB_CLIENT_ID }}
 
       - name: Smoke test personal macOS install, upgrade, and uninstall
         shell: bash
@@ -138,7 +138,7 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows unsigned release
-        run: flutter build windows --release
+        run: flutter build windows --release --dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=${{ vars.TOTP_VAULT_GITHUB_CLIENT_ID }}
 
       - name: Smoke test personal Windows install, upgrade, and uninstall
         shell: pwsh

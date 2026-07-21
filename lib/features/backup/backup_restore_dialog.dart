@@ -8,7 +8,9 @@ import '../../platform/files/backup_file_service.dart';
 
 /// In-memory restore preview followed by one atomic Vault save.
 class BackupRestoreDialog extends ConsumerStatefulWidget {
-  const BackupRestoreDialog({super.key});
+  const BackupRestoreDialog({super.key, this.initialBackup});
+
+  final PickedBackupFile? initialBackup;
 
   @override
   ConsumerState<BackupRestoreDialog> createState() =>
@@ -30,6 +32,7 @@ class _BackupRestoreDialogState extends ConsumerState<BackupRestoreDialog>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pickedFile = widget.initialBackup;
   }
 
   @override

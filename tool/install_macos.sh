@@ -59,6 +59,23 @@ log() {
   printf '[TOTP Vault installer] %s\n' "$1"
 }
 
+# Returns success only when the application at the requested destination is
+# running. Another test or installation with the same executable name must not
+# block operations on an unrelated .app bundle.
+is_destination_running() {
+  local target_executable="$destination_app/$APP_EXECUTABLE_RELATIVE"
+  local pid=''
+  local command=''
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$command" == "$target_executable" || "$command" == "$target_executable "* ]]; then
+      return 0
+    fi
+  done < <(pgrep -x google_code 2>/dev/null || true)
+  return 1
+}
+
 require_value() {
   local option="$1"
   local value="${2:-}"
@@ -123,7 +140,7 @@ if $uninstall && $launch_after_install; then
   fail '--launch cannot be combined with --uninstall.'
 fi
 
-if pgrep -x google_code >/dev/null 2>&1; then
+if is_destination_running; then
   fail 'TOTP Vault is running. Quit it before installing, upgrading, or uninstalling.'
 fi
 
@@ -148,9 +165,19 @@ if ! $skip_build; then
   if $dry_run; then
     log "Would run a Flutter Release build in $REPO_ROOT."
   elif command -v fvm >/dev/null 2>&1; then
-    (cd "$REPO_ROOT" && fvm flutter build macos --release)
+    if [[ -n "${TOTP_VAULT_GITHUB_CLIENT_ID:-}" ]]; then
+      (cd "$REPO_ROOT" && fvm flutter build macos --release \
+        "--dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=$TOTP_VAULT_GITHUB_CLIENT_ID")
+    else
+      (cd "$REPO_ROOT" && fvm flutter build macos --release)
+    fi
   elif command -v flutter >/dev/null 2>&1; then
-    (cd "$REPO_ROOT" && flutter build macos --release)
+    if [[ -n "${TOTP_VAULT_GITHUB_CLIENT_ID:-}" ]]; then
+      (cd "$REPO_ROOT" &&  flutter build macos --release \
+        "--dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=$TOTP_VAULT_GITHUB_CLIENT_ID")
+    else
+      (cd "$REPO_ROOT" &&  flutter build macos --release)
+    fi
   else
     fail 'Neither fvm nor flutter is available. Install Flutter or use --skip-build.'
   fi

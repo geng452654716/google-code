@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('macOS sandbox allows read-only access to user-selected QR images', () {
+  test('macOS sandbox allows access to selected QR images and sync folders', () {
     for (final path in <String>[
       'macos/Runner/DebugProfile.entitlements',
       'macos/Runner/Release.entitlements',
@@ -12,8 +12,9 @@ void main() {
 
       expect(
         entitlements,
-        contains('com.apple.security.files.user-selected.read-only'),
-        reason: '$path must allow NSOpenPanel to expose a selected image.',
+        contains('com.apple.security.files.user-selected.read-write'),
+        reason:
+            '$path must allow NSOpenPanel to expose selected images and cloud backup folders.',
       );
     }
   });

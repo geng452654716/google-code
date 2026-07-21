@@ -343,6 +343,35 @@ class MainFlutterWindow: NSWindow {
         self.writeQuickUnlockKey(typedData.data, result: result)
       case "delete":
         self.deleteQuickUnlockKey(result: result)
+      case "readSecret":
+        guard let key = self.cloudSecretKey(from: call.arguments) else {
+          result(
+            FlutterError(
+              code: "invalid_secret", message: "Device secret key is invalid.", details: nil))
+          return
+        }
+        self.readCloudSecret(key: key, result: result)
+      case "writeSecret":
+        guard let arguments = call.arguments as? [String: Any],
+          let key = self.cloudSecretKey(from: arguments),
+          let typedData = arguments["value"] as? FlutterStandardTypedData,
+          !typedData.data.isEmpty,
+          typedData.data.count <= 4096
+        else {
+          result(
+            FlutterError(
+              code: "invalid_secret", message: "Device secret is invalid.", details: nil))
+          return
+        }
+        self.writeCloudSecret(key: key, data: typedData.data, result: result)
+      case "deleteSecret":
+        guard let key = self.cloudSecretKey(from: call.arguments) else {
+          result(
+            FlutterError(
+              code: "invalid_secret", message: "Device secret key is invalid.", details: nil))
+          return
+        }
+        self.deleteCloudSecret(key: key, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -428,6 +457,96 @@ class MainFlutterWindow: NSWindow {
         FlutterError(
           code: "secure_store_delete_failed",
           message: "Unable to delete quick unlock material.",
+          details: nil))
+      return
+    }
+    result(nil)
+  }
+
+  /// Validates and extracts an application-owned cloud secret identifier.
+  private func cloudSecretKey(from arguments: Any?) -> String? {
+    guard let values = arguments as? [String: Any],
+      let key = values["key"] as? String,
+      key.range(of: "^[a-z0-9][a-z0-9._-]{0,127}$", options: .regularExpression) != nil
+    else {
+      return nil
+    }
+    return key
+  }
+
+  /// Returns the Keychain identity for one cloud authorization secret.
+  private func cloudSecretKeychainQuery(key: String) -> [String: Any] {
+    [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "com.gengyujian.google-code.cloud-secrets",
+      kSecAttrAccount as String: key,
+    ]
+  }
+
+  /// Reads one cloud authorization secret without logging its contents.
+  private func readCloudSecret(key: String, result: FlutterResult) {
+    var query = cloudSecretKeychainQuery(key: key)
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    query[kSecReturnData as String] = true
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecItemNotFound {
+      result(nil)
+      return
+    }
+    guard status == errSecSuccess, let data = item as? Data,
+      !data.isEmpty, data.count <= 4096
+    else {
+      result(
+        FlutterError(
+          code: "secure_store_read_failed",
+          message: "Unable to read device secret.",
+          details: nil))
+      return
+    }
+    result(FlutterStandardTypedData(bytes: data))
+  }
+
+  /// Adds or atomically updates one device-only cloud authorization secret.
+  private func writeCloudSecret(key: String, data: Data, result: FlutterResult) {
+    var query = cloudSecretKeychainQuery(key: key)
+    let updateStatus = SecItemUpdate(
+      query as CFDictionary,
+      [kSecValueData as String: data] as CFDictionary)
+    if updateStatus == errSecSuccess {
+      result(nil)
+      return
+    }
+    guard updateStatus == errSecItemNotFound else {
+      result(
+        FlutterError(
+          code: "secure_store_write_failed",
+          message: "Unable to update device secret.",
+          details: nil))
+      return
+    }
+    query[kSecValueData as String] = data
+    query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+    let addStatus = SecItemAdd(query as CFDictionary, nil)
+    guard addStatus == errSecSuccess else {
+      result(
+        FlutterError(
+          code: "secure_store_write_failed",
+          message: "Unable to save device secret.",
+          details: nil))
+      return
+    }
+    result(nil)
+  }
+
+  /// Deletes one cloud authorization secret; a missing item is already removed.
+  private func deleteCloudSecret(key: String, result: FlutterResult) {
+    let status = SecItemDelete(cloudSecretKeychainQuery(key: key) as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+      result(
+        FlutterError(
+          code: "secure_store_delete_failed",
+          message: "Unable to delete device secret.",
           details: nil))
       return
     }

@@ -162,3 +162,29 @@ lib/
 ```
 
 应用不依赖后端，不应上传或记录 Secret、验证码、`otpauth://` URI 或二维码内容。
+
+## 云备份
+
+应用支持手动将独立密码加密的 `.gcbak` 备份到：
+
+- iCloud Drive 同步目录；
+- Google Drive 桌面版同步目录；
+- GitHub App 获得授权的专用私有仓库。
+
+iCloud 与 Google Drive 由系统或桌面客户端负责登录和同步。GitHub 使用 Device Flow，用户可以登录自己选择的 GitHub 账号；Token 仅保存到当前设备的 macOS Keychain 或 Windows Credential Manager。 当前 GitHub App 允许任意个人或组织账号安装；安装时建议选择 `Only select repositories`，并只授权专用私有备份仓库。
+
+GitHub 功能需要在构建时提供 GitHub App Client ID：
+
+```bash
+export TOTP_VAULT_GITHUB_CLIENT_ID=Ivxxxxxxxxxxxxxxxxxx
+bash tool/package_macos_dmg.sh
+```
+
+Windows PowerShell：
+
+```powershell
+$env:TOTP_VAULT_GITHUB_CLIENT_ID = 'Ivxxxxxxxxxxxxxxxxxx'
+.\tool\package_windows_exe.ps1
+```
+
+GitHub Actions 的 `Personal Install Readiness` 使用 Repository Variable `TOTP_VAULT_GITHUB_CLIENT_ID`。不要提交 Client Secret、GitHub App private key 或用户 Token。完整配置与安全边界见 `docs/PHASE25_STATUS.md`。

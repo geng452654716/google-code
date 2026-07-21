@@ -114,9 +114,19 @@ if [[ "$SKIP_BUILD" == false ]]; then
   else
     cd "$REPOSITORY_ROOT"
     if command -v fvm >/dev/null 2>&1; then
-      fvm flutter build macos --release
+      if [[ -n "${TOTP_VAULT_GITHUB_CLIENT_ID:-}" ]]; then
+        fvm flutter build macos --release \
+          "--dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=$TOTP_VAULT_GITHUB_CLIENT_ID"
+      else
+        fvm flutter build macos --release
+      fi
     elif command -v flutter >/dev/null 2>&1; then
-      flutter build macos --release
+      if [[ -n "${TOTP_VAULT_GITHUB_CLIENT_ID:-}" ]]; then
+        flutter build macos --release \
+          "--dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=$TOTP_VAULT_GITHUB_CLIENT_ID"
+      else
+        flutter build macos --release
+      fi
     else
       fail 'Neither fvm nor flutter is available. Install Flutter or use --skip-build.'
     fi
