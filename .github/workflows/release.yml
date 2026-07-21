@@ -1,21 +1,95 @@
-name: Personal Install Readiness
+name: Build GitHub Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag; leave blank to use v<pubspec version>, for example v1.0.3+4'
+        required: false
+        type: string
+      prerelease:
+        description: 'Publish as a prerelease'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-readiness-${{ github.ref }}
+  group: github-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   FLUTTER_VERSION: '3.44.0'
 
 jobs:
+  prepare:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      version: ${{ steps.release.outputs.version }}
+      package_version: ${{ steps.release.outputs.package_version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Validate tag against pubspec
+        id: release
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          REQUESTED_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          version="$(awk '/^version:[[:space:]]*/ { print $2; exit }' pubspec.yaml)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$ ]]; then
+            echo "pubspec.yaml must contain a version such as 1.0.3+4." >&2
+            exit 1
+          fi
+
+          expected_tag="v$version"
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            release_tag="$GITHUB_REF_NAME"
+            prerelease='false'
+          else
+            if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+              echo "Manual releases must run from the main branch." >&2
+              exit 1
+            fi
+            release_tag="${REQUESTED_TAG:-$expected_tag}"
+            prerelease="${REQUESTED_PRERELEASE:-false}"
+          fi
+
+          if [[ "$release_tag" != "$expected_tag" ]]; then
+            echo "Release tag $release_tag does not match pubspec version $expected_tag." >&2
+            exit 1
+          fi
+
+          package_version="${version/+/-build}"
+          {
+            echo "release_tag=$release_tag"
+            echo "version=$version"
+            echo "package_version=$package_version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release input"
+            echo "- Tag: \`$release_tag\`"
+            echo "- Version: \`$version\`"
+            echo "- Prerelease: \`$prerelease\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   metadata-audit:
     name: Dependency and license audit
+    needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -35,17 +109,30 @@ jobs:
       - name: Audit dependency sources and licenses
         run: dart run tool/release_metadata.dart
 
+      - name: Package release metadata
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.prepare.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          archive="dist/release/TOTPVault-${PACKAGE_VERSION}-release-metadata.zip"
+          cd build/release-metadata
+          zip -q -r "$GITHUB_WORKSPACE/$archive" .
+          cd "$GITHUB_WORKSPACE/dist/release"
+          sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256"
+
       - name: Upload release metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: google-code-release-metadata
-          path: build/release-metadata/
-          retention-days: 14
+          name: totp-vault-release-metadata
+          path: dist/release/
+          retention-days: 7
           if-no-files-found: error
 
   macos-release:
-    name: macOS personal build and install
-    needs: metadata-audit
+    name: Build and verify macOS DMG
+    needs: prepare
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -62,7 +149,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build macOS unsigned release
+      - name: Build macOS release
         run: flutter build macos --release --dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=${{ vars.TOTP_VAULT_GITHUB_CLIENT_ID }}
 
       - name: Smoke test personal macOS install, upgrade, and uninstall
@@ -91,16 +178,14 @@ jobs:
             --uninstall
           test ! -e "$destination"
 
-      - name: Generate release metadata
-        run: dart run tool/release_metadata.dart
-
-      - name: Build and verify personal macOS DMG
+      - name: Build and verify macOS DMG
         shell: bash
         run: |
+          set -euo pipefail
           bash tool/package_macos_dmg.sh --skip-build
           dmg_path="$(find dist/macos -maxdepth 1 -name '*.dmg' -print -quit)"
           test -n "$dmg_path"
-          mount_path="$RUNNER_TEMP/google-code-dmg"
+          mount_path="$RUNNER_TEMP/totp-vault-dmg"
           mkdir -p "$mount_path"
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_path" "$dmg_path" >/dev/null
           trap 'hdiutil detach "$mount_path" >/dev/null' EXIT
@@ -108,19 +193,19 @@ jobs:
           test -L "$mount_path/Applications"
           codesign --verify --deep --strict "$mount_path/TOTP Vault.app"
 
-      - name: Upload macOS personal DMG
+      - name: Upload macOS release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: google-code-macos-personal-dmg
+          name: totp-vault-release-macos
           path: |
             dist/macos/*.dmg
             dist/macos/*.dmg.sha256
-          retention-days: 14
+          retention-days: 7
           if-no-files-found: error
 
   windows-release:
-    name: Windows personal build and install
-    needs: metadata-audit
+    name: Build and verify Windows Setup EXE
+    needs: prepare
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -137,7 +222,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build Windows unsigned release
+      - name: Build Windows release
         run: flutter build windows --release --dart-define=TOTP_VAULT_GITHUB_CLIENT_ID=${{ vars.TOTP_VAULT_GITHUB_CLIENT_ID }}
 
       - name: Smoke test personal Windows install, upgrade, and uninstall
@@ -187,7 +272,7 @@ jobs:
             choco install innosetup --no-progress -y
           }
 
-      - name: Build Windows personal setup EXE
+      - name: Build Windows setup EXE
         shell: pwsh
         run: ./tool/package_windows_exe.ps1 -SkipBuild
 
@@ -238,12 +323,85 @@ jobs:
             throw 'External Vault fixture was unexpectedly modified.'
           }
 
-      - name: Upload Windows personal setup EXE
+      - name: Upload Windows release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: google-code-windows-personal-setup
+          name: totp-vault-release-windows
           path: |
             dist/windows/*-setup.exe
             dist/windows/*-setup.exe.sha256
-          retention-days: 14
+          retention-days: 7
           if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - prepare
+      - metadata-audit
+      - macos-release
+      - windows-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: totp-vault-release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          test "$(find . -maxdepth 1 -type f -name '*.sha256' | wc -l | tr -d ' ')" -eq 3
+          for checksum in *.sha256; do
+            sha256sum --check "$checksum"
+          done
+
+      - name: Create GitHub Release and download links
+        id: publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists." >&2
+            exit 1
+          fi
+
+          args=(
+            "$RELEASE_TAG"
+            release-assets/*
+            --repo "$GITHUB_REPOSITORY"
+            --target "$GITHUB_SHA"
+            --title "TOTP Vault $RELEASE_VERSION"
+            --generate-notes
+          )
+          if [[ "$PRERELEASE" == 'true' ]]; then
+            args+=(--prerelease)
+          else
+            args+=(--latest)
+          fi
+          gh release create "${args[@]}"
+
+          release_url="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
+          {
+            echo "## TOTP Vault $RELEASE_VERSION"
+            echo
+            echo "Release: [$RELEASE_TAG]($release_url)"
+            echo
+            echo "### Downloads"
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets[] | "- [\(.name)](\(.url))"'
+            echo
+            echo "> macOS package uses ad hoc signing and Windows package is not Authenticode signed."
+          } >> "$GITHUB_STEP_SUMMARY"

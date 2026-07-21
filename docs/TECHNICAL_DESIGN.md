@@ -1,4 +1,4 @@
-# Google Code 桌面动态验证码生成器技术设计文档
+# TOTP Vault 桌面动态验证码生成器技术设计文档
 
 - 文档版本：v0.4（阶段 18 实现同步）
 - 更新日期：2026-07-20
@@ -480,7 +480,7 @@ flowchart LR
 7. `restartApplication` 由 macOS runner 启动一个只负责延迟打开当前 `Bundle.main.bundleURL` 的 relauncher，MethodChannel 返回成功后正常终止当前进程，使首次授权后的 TCC 状态能被新进程重新加载。
 8. 截图字节复用图片限制、QR 识别、统一确认、重复检测和 Vault 保存流程。
 
-TCC 按应用代码签名身份保存屏幕录制授权。默认 Flutter 个人构建为 ad hoc 签名，重新构建后 CodeDirectory hash 会变化，即使系统设置仍显示同名 `Google Code` 为开启，新二进制也可能不匹配旧授权。`tool/package_macos_dmg.sh` 与 `tool/install_macos.sh` 因此支持 `GOOGLE_CODE_CODESIGN_IDENTITY` / `--codesign-identity`：若本机已有 Apple Development 等稳定 identity，则在 staging app 上重新签名，并保留 identifier 和 entitlements。脚本不会自动创建或信任证书，也不会修改 TCC 数据库或绕过系统隐私机制。
+TCC 按应用代码签名身份保存屏幕录制授权。默认 Flutter 个人构建为 ad hoc 签名，重新构建后 CodeDirectory hash 会变化，即使系统设置仍显示同名 `TOTP Vault` 为开启，新二进制也可能不匹配旧授权。`tool/package_macos_dmg.sh` 与 `tool/install_macos.sh` 因此支持 `TOTP_VAULT_CODESIGN_IDENTITY` / `--codesign-identity`，并保留 `GOOGLE_CODE_CODESIGN_IDENTITY` 作为兼容回退：若本机已有 Apple Development 等稳定 identity，则在 staging app 上重新签名，并保留 identifier 和 entitlements。脚本不会自动创建或信任证书，也不会修改 TCC 数据库或绕过系统隐私机制。
 
 Windows 使用自有 GDI 区域选择器，不依赖 Snipping Tool URI：
 
@@ -859,7 +859,7 @@ sequenceDiagram
 
 ## 16. 加密备份与恢复
 
-阶段 8 已实现本节首版闭环，文件扩展名固定为 `Google Code Backup (.gcbak)`。
+阶段 8 已实现本节首版闭环，文件扩展名固定为 `TOTP Vault Backup (.gcbak)`。
 
 ### 16.1 独立备份 envelope
 
@@ -1197,7 +1197,7 @@ P0 不申请网络能力，不启动本地 HTTP 服务。
 
 ## 24. CI/CD
 
-阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14 新增 `.github/workflows/release-readiness.yml`，阶段 15 将其定位调整为手动 Personal Install Readiness。阶段 16 在手动工作流中继续执行 Release 构建、依赖来源/许可证审计和脚本安装闭环，并增加 DMG / Setup EXE 的生成、挂载或静默安装、重复升级、卸载和短期私有 Artifact 上传，避免增加每次普通提交的 CI 负担。
+阶段 12 已在 `.github/workflows/desktop-ci.yml` 落地 GitHub Actions，并固定 Flutter 3.44.0 与所有 Action 的完整提交 SHA。工作流在 `main` push、Pull Request 和手动触发时运行；默认令牌仅授予 `contents: read`，同一 ref 的旧运行会被自动取消。阶段 14–16 使用 `.github/workflows/release-readiness.yml` 完成手动 Personal Install Readiness、Release 构建、依赖来源/许可证审计、DMG / Setup EXE 打包和安装闭环。阶段 27 将该工作流替换为 `.github/workflows/release.yml`：支持 `v*` tag 与从 `main` 手动触发，校验 tag 必须匹配 `pubspec.yaml`，并只在全部构建、安装/升级/卸载冒烟测试和 SHA-256 校验通过后创建 GitHub Release。
 
 ### 24.1 每次提交
 
@@ -1223,21 +1223,35 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 - `.dart_tool/package_config.json` 只用于定位本次解析后的包目录；本机 package cache 的镜像路径不会覆盖 lockfile 来源判定，也不会写入发布报告。
 - 生成 `dependency-manifest.json` 和 `THIRD_PARTY_NOTICES.txt`，记录精确版本、依赖关系、lockfile SHA-256、许可证内容 SHA-256 和去重后的许可证文本。
 - 在 `macos-15` 和 `windows-2022` 分别执行 Release 构建，归档应用目录、发布元数据和 `UNSIGNED_BUILD.txt`，并为归档生成独立 SHA-256 文件。
-- Artifact 名称明确包含 `unsigned`，保留 14 天，只用于本人设备安装准备、问题定位和真机验收；工作流不会创建 GitHub Release。
+- 各平台 Job 的临时 Artifact 仅保留 7 天，最终发布 Job 合并并验证 3 组 SHA-256 后，创建包含 DMG、Setup EXE、release metadata 和校验文件的 GitHub Release。
 - macOS 构建可能带 Xcode ad hoc 签名，但没有 Apple Developer ID 签名或公证；Windows 构建没有 Authenticode 签名。
 - SHA-256 只能验证内容完整性，不能认证发布者或替代可信代码签名。
 - 自动许可证清单是锁定依赖快照，不等同于法律意见；正式分发前仍需人工审查。
 
-当前产品范围是个人自用，不把以下公开分发能力作为阶段退出条件：Apple Developer ID 签名/公证、Windows Authenticode、MSIX/MSI、应用商店、公开 GitHub Release 和自动更新服务。阶段 16 的 DMG 与 Inno Setup EXE 只是个人安装容器，不改变这一决策。若未来改变分发范围，必须重新启动可信签名、商标、安装包、SBOM、漏洞扫描和目标平台发布评审，不能直接把当前个人安装产物视为公开发布产物。
+当前产品范围仍是个人自用。阶段 27 公开源码仓库并通过 GitHub Release 提供个人安装包，但不把 Apple Developer ID 签名/公证、Windows Authenticode、MSIX/MSI、应用商店或自动更新作为阶段退出条件。公开下载地址不改变安装包的信任等级；若未来面向第三方正式分发，必须重新启动可信签名、商标、安装包、SBOM、漏洞扫描和目标平台发布评审，不能直接把当前个人安装产物视为可信发布产物。
 
 阶段 14 最终 Release Readiness 运行 `29568998326` 已通过依赖/许可证审计、macOS Release 和 Windows Release 三个 Job。下载最终 Artifact 后，macOS 与 Windows 的独立 SHA-256 均可由 macOS `shasum -c` 验证，且归档包含应用、manifest、notices 和 unsigned 声明。首轮运行曾发现 PowerShell CRLF 导致 Windows 校验文件跨平台不兼容，已在 `7ba1149` 改为无 BOM ASCII + LF 并重跑验证。
 
 阶段 15 Personal Install Readiness 运行 `29572098688` 在保留上述审计和归档能力的同时，新增双平台临时用户目录安装验收。Dependency audit、macOS personal build/install、Windows personal build/install 三个 Job 全部通过，其中 Windows 安装步骤在真实 `windows-2022` Runner 执行成功。
 
-### 24.3 个人安装模型
+### 24.3 GitHub Release 发布模型
 
-- `tool/install_macos.sh` 默认从本地 Release `.app` 安装到 `~/Applications/Google Code.app`；使用 `ditto` 保留 bundle 内容，并用 `codesign --verify --deep --strict` 验证复制后的 bundle 完整性。可通过 `GOOGLE_CODE_CODESIGN_IDENTITY` 或 `--codesign-identity` 在 staging app 上应用稳定本机签名，减少升级后的 TCC 权限身份变化。
-- `tool/install_windows.ps1` 默认从本地 Windows Release 运行目录安装到 `%LOCALAPPDATA%\Programs\Google Code`，并通过 `WScript.Shell` 为当前用户创建开始菜单快捷方式。
+阶段 27 的 `.github/workflows/release.yml` 采用最小权限和发布前验证：
+
+- 全局 `permissions` 为 `contents: read`，只有最终 `publish-release` Job 使用 `contents: write`；
+- `prepare` Job 从 `pubspec.yaml` 读取 `x.y.z+build`，tag 必须严格等于 `v<version>`；
+- macOS、Windows 和 metadata Job 分别生成安装包、依赖审计文件和 SHA-256，并先上传短期 Artifact；
+- 最终 Job 下载所有产物，要求恰好存在 3 个校验文件且 `sha256sum --check` 全部通过；
+- 使用 `gh release create` 自动创建 tag/Release，并在 Actions Summary 输出 Release 页面和每个 asset 的下载链接；
+- 正式版标记为 Latest，手动触发可选择 prerelease；已存在同名 Release 时直接失败，避免静默覆盖；
+- macOS ad hoc 签名和 Windows 未签名状态必须继续在 README、Release 工作流摘要和阶段文档中明确提示。
+
+GitHub Release 是下载渠道，不是可信签名或真机验收的替代品。
+
+### 24.4 个人安装模型
+
+- `tool/install_macos.sh` 默认从本地 Release `.app` 安装到 `~/Applications/TOTP Vault.app`；使用 `ditto` 保留 bundle 内容，并用 `codesign --verify --deep --strict` 验证复制后的 bundle 完整性。可通过 `TOTP_VAULT_CODESIGN_IDENTITY` 或 `--codesign-identity` 在 staging app 上应用稳定本机签名，减少升级后的 TCC 权限身份变化。
+- `tool/install_windows.ps1` 默认从本地 Windows Release 运行目录安装到 `%LOCALAPPDATA%\Programs\TOTP Vault`，并通过 `WScript.Shell` 为当前用户创建开始菜单快捷方式。
 - `tool/package_macos_dmg.sh` 使用 `ditto` 把现有 Release `.app` 放入临时 staging；指定稳定签名 identity 时先在 staging app 上重新签名，再加入指向 `/Applications` 的符号链接并通过 `hdiutil create -format UDZO` 生成压缩 DMG；生成后执行 `codesign --verify`、`hdiutil verify` 和 SHA-256。
 - `tool/package_windows_exe.ps1` 解析 `pubspec.yaml` 版本、定位 Inno Setup 6 的 `ISCC.exe`，并编译 `windows/installer/google_code.iss`。Setup EXE 使用 `PrivilegesRequired=lowest` 安装到当前用户目录，创建当前用户开始菜单入口，并支持 Inno Setup 原生覆盖升级和卸载。
 - 阶段 15 的两个直接安装脚本均先复制到同级 staging，验证后把旧版本移动为 backup，再原子提升新目录；失败时恢复旧版本，成功后清理 transaction 目录。
@@ -1248,7 +1262,7 @@ macOS `.app` 先打包为 tar.gz；Windows 上传完整 Debug 运行目录。两
 - DMG 和 Setup EXE 均生成独立 `.sha256`；校验值用于发现文件损坏，不认证发布者。Windows 安装包会记录 `Get-AuthenticodeSignature` 状态，但当前预期为 `NotSigned`。
 - 更新方式是从可信本地源码重新构建后再次运行安装脚本；P0/P1 不提供联网自动更新。
 
-### 24.4 更新机制
+### 24.5 更新机制
 
 P0 不实现自动更新。后续若增加：
 
@@ -1313,7 +1327,7 @@ P0 不实现自动更新。后续若增加：
 - 性能优化、可访问性。
 - [阶段 14 已实现基线] 锁定依赖来源/许可证审计、macOS/Windows Release 模式归档和 SHA-256。
 - [阶段 15 已实现] macOS/Windows 当前用户级安装、可恢复覆盖升级、默认保留数据的卸载和 CI 临时目录冒烟测试。
-- [范围外] 个人自用模式不要求 Apple Developer ID、公证、Windows Authenticode、商业安装包、应用商店或公开 GitHub Release；未来如改变分发范围再重新评审。
+- [阶段 27 已实现] 公开源码仓库与 GitHub Release 自动打包；Developer ID、公证、Windows Authenticode、应用商店和自动更新仍为范围外能力。
 
 ## 26. 需求到技术实现映射
 
@@ -1371,7 +1385,7 @@ P0 不实现自动更新。后续若增加：
 
 ## 29. 实施前必须确认的决策
 
-1. [已确认] 个人版同时维护 macOS 和 Windows，但不进行公开发布。
+1. [已确认，2026-07-21 更新] 个人版同时维护 macOS 和 Windows；源码仓库和个人安装包通过 GitHub Release 公开，但不宣称具备可信签名的第三方正式分发能力。
 2. 单账号分享是否从 P1 提升为 P0。
 3. Windows 系统分享面板是硬性要求，还是允许复制/保存降级。
 4. 主密码最低规则和自动锁定默认时长。

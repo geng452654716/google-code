@@ -85,7 +85,7 @@ GitHub Client ID 通过编译参数注入：
 export TOTP_VAULT_GITHUB_CLIENT_ID=Ivxxxxxxxxxxxxxxxxxx
 ```
 
-GitHub Actions `Personal Install Readiness` 会读取 Repository Variable：
+GitHub Actions `Build GitHub Release` 会读取 Repository Variable：
 
 ```text
 TOTP_VAULT_GITHUB_CLIENT_ID
