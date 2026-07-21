@@ -75,9 +75,31 @@ Actions Summary 会输出 Release 页面和所有 asset 下载链接。
 
 ## 验证记录
 
-完成本阶段时需要记录：
+### 本地验证
 
-- 本地格式、静态分析、全量测试和 `git diff --check` 结果；
-- GitHub 仓库 Public 可见性验证；
-- 首次 Release tag、Actions run ID、Release 页面和资产数量；
-- DMG、Setup EXE 和 metadata 的下载链接。
+- 公开前扫描 Git 历史 `29` 个提交和当前工作树，未发现 GitHub Token、私钥、AWS/Google 密钥、Client Secret、Vault、`.gcbak`、证书或数据库文件进入版本历史；
+- `.local-recovery/` 继续由 `.gitignore` 忽略；
+- Ruby YAML 解析通过；
+- `dart format` 通过；
+- `flutter analyze --no-pub` 无问题；
+- Flutter 全量测试 `179` 项全部通过；
+- `git diff --check` 通过。
+
+### GitHub 验证
+
+- 仓库：[`geng452654716/google-code`](https://github.com/geng452654716/google-code)；
+- 可见性：`PUBLIC`；
+- 发布提交：`140f2c885911fe0a0e7f6d605e5d3e2b5e299c89`；
+- Actions run：[`29810828935`](https://github.com/geng452654716/google-code/actions/runs/29810828935)，全部 5 个 Job 成功；
+- Release：[`v1.0.3+4`](https://github.com/geng452654716/google-code/releases/tag/v1.0.3%2B4)；
+- 发布时间：2026-07-21 07:37:26 UTC；
+- 状态：正式版、非 Draft、非 Prerelease，共 6 个 assets。
+
+### 下载
+
+- [macOS DMG](https://github.com/geng452654716/google-code/releases/download/v1.0.3%2B4/TOTPVault-1.0.3-build4-macos-universal.dmg)
+- [macOS SHA-256](https://github.com/geng452654716/google-code/releases/download/v1.0.3%2B4/TOTPVault-1.0.3-build4-macos-universal.dmg.sha256)
+- [Windows Setup EXE](https://github.com/geng452654716/google-code/releases/download/v1.0.3%2B4/TOTPVault-1.0.3-build4-windows-x64-setup.exe)
+- [Windows SHA-256](https://github.com/geng452654716/google-code/releases/download/v1.0.3%2B4/TOTPVault-1.0.3-build4-windows-x64-setup.exe.sha256)
+- [Release metadata](https://github.com/geng452654716/google-code/releases/download/v1.0.3%2B4/TOTPVault-1.0.3-build4-release-metadata.zip)
+- [Metadata SHA-256](https://github.com/geng452654716/google-code/releases/download/v1.0.3%2B4/TOTPVault-1.0.3-build4-release-metadata.zip.sha256)
