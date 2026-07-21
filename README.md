@@ -108,7 +108,7 @@ $env:TOTP_VAULT_GITHUB_CLIENT_ID = 'Ivxxxxxxxxxxxxxxxxxx'
 .\tool\package_windows_exe.ps1
 ```
 
-GitHub Actions 的 `Build GitHub Release` 工作流读取 Repository Variable `TOTP_VAULT_GITHUB_CLIENT_ID`。Client ID 可以公开，但不要提交 Client Secret、GitHub App private key、用户 Token、Vault 或真实备份文件。完整配置和安全边界见 [`docs/PHASE25_STATUS.md`](docs/PHASE25_STATUS.md) 与 [`docs/PHASE26_STATUS.md`](docs/PHASE26_STATUS.md)。
+GitHub Actions 的 `Build GitHub Release` 工作流读取 Repository Variable `TOTP_VAULT_GITHUB_CLIENT_ID`。Client ID 可以公开，但不要提交 Client Secret、GitHub App private key、用户 Token、Vault 或真实备份文件。
 
 ## 开发
 
@@ -155,14 +155,11 @@ lib/
   workflows/      跨平台质量检查与 GitHub Release 打包
 ```
 
-## 文档与项目状态
+## 技术文档
 
-阶段 0–27 覆盖技术验证、核心 Vault、导入、分享、备份、平台能力、安装包、云备份、自动备份和 GitHub Release。主要文档：
-
-- [`docs/PRD.md`](docs/PRD.md)
-- [`docs/TECHNICAL_DESIGN.md`](docs/TECHNICAL_DESIGN.md)
-- [`docs/PHASE27_STATUS.md`](docs/PHASE27_STATUS.md)
-- [`docs/adr/0001-foundation-stack.md`](docs/adr/0001-foundation-stack.md)
+- [产品需求](docs/PRD.md)
+- [技术设计](docs/TECHNICAL_DESIGN.md)
+- [基础技术栈架构决策](docs/adr/0001-foundation-stack.md)
 
 ## 当前限制
 
