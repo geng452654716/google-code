@@ -91,6 +91,7 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
     final activeInitialization = _initializeFuture;
     if (activeInitialization != null) {
       await activeInitialization;
+      if (!ref.mounted) return;
       if (!force) return;
     }
     if (_initialized && !force) return;
@@ -99,6 +100,7 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
     _initializeFuture = operation;
     try {
       await operation;
+      if (!ref.mounted) return;
       _initialized = true;
     } finally {
       if (identical(_initializeFuture, operation)) {
@@ -110,19 +112,20 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
   Future<void> _reconcileStoredConfiguration() async {
     Uint8List? passwordBytes;
     try {
-      passwordBytes = await ref
-          .read(deviceSecretStoreProvider)
-          .read(_githubAutoBackupPasswordKey);
-      final connection = await ref.read(githubBackupProvider).connectionState();
+      final secretStore = ref.read(deviceSecretStoreProvider);
+      final githubProvider = ref.read(githubBackupProvider);
+      passwordBytes = await secretStore.read(_githubAutoBackupPasswordKey);
+      if (!ref.mounted) return;
+      final connection = await githubProvider.connectionState();
+      if (!ref.mounted) return;
       final canRun =
           passwordBytes != null &&
           passwordBytes.isNotEmpty &&
           connection.isConnected &&
           connection.repository != null;
       if (!canRun && passwordBytes != null) {
-        await ref
-            .read(deviceSecretStoreProvider)
-            .delete(_githubAutoBackupPasswordKey);
+        await secretStore.delete(_githubAutoBackupPasswordKey);
+        if (!ref.mounted) return;
       }
       state = state.copyWith(
         isInitialized: true,
@@ -132,6 +135,7 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
         clearLastSuccessfulAt: !canRun,
       );
     } on Object {
+      if (!ref.mounted) return;
       state = state.copyWith(
         isInitialized: true,
         isEnabled: false,
@@ -243,6 +247,7 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
   Future<void> scheduleAfterAccountAddition(VaultPayload payload) async {
     try {
       await initialize();
+      if (!ref.mounted) return;
       if (!state.isEnabled) return;
       _pendingPayload = payload;
       if (_isDraining) return;
@@ -252,8 +257,10 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
         if (pending == null) break;
         _pendingPayload = null;
         await _uploadAddedAccounts(pending);
+        if (!ref.mounted) return;
       }
     } on Object {
+      if (!ref.mounted) return;
       _notify(
         '账号已保存，但 GitHub 自动备份失败，请稍后重试。',
         isError: true,
@@ -268,9 +275,11 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
     state = state.copyWith(isProcessing: true, clearNotification: true);
     Uint8List? passwordBytes;
     try {
-      passwordBytes = await ref
-          .read(deviceSecretStoreProvider)
-          .read(_githubAutoBackupPasswordKey);
+      final secretStore = ref.read(deviceSecretStoreProvider);
+      final cloudBackupService = ref.read(cloudBackupServiceProvider);
+      final githubProvider = ref.read(githubBackupProvider);
+      passwordBytes = await secretStore.read(_githubAutoBackupPasswordKey);
+      if (!ref.mounted) return;
       if (passwordBytes == null || passwordBytes.isEmpty) {
         state = state.copyWith(isEnabled: false, isProcessing: false);
         _notify(
@@ -281,13 +290,12 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
         return;
       }
       final password = utf8.decode(passwordBytes);
-      final result = await ref
-          .read(cloudBackupServiceProvider)
-          .upload(
-            provider: ref.read(githubBackupProvider),
-            payload: payload,
-            password: password,
-          );
+      final result = await cloudBackupService.upload(
+        provider: githubProvider,
+        payload: payload,
+        password: password,
+      );
+      if (!ref.mounted) return;
       if (result == null) {
         throw const CloudBackupException('GitHub 未返回备份结果。');
       }
@@ -300,6 +308,7 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
         source: GitHubAutoBackupNotificationSource.accountAddition,
       );
     } on CloudBackupException catch (error) {
+      if (!ref.mounted) return;
       state = state.copyWith(isProcessing: false);
       _notify(
         '账号已保存，但 GitHub 自动备份失败：${error.message}',
@@ -307,6 +316,7 @@ class GitHubAutoBackupController extends Notifier<GitHubAutoBackupState>
         source: GitHubAutoBackupNotificationSource.accountAddition,
       );
     } on Object {
+      if (!ref.mounted) return;
       state = state.copyWith(isProcessing: false);
       _notify(
         '账号已保存，但 GitHub 自动备份失败，请稍后重试。',

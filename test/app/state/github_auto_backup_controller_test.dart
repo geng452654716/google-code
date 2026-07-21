@@ -133,6 +133,31 @@ void main() {
     expect(cloud.payloads, [same(payload)]);
     expect(container.read(githubAutoBackupProvider).isEnabled, isTrue);
   });
+
+  test(
+    'disposing during startup reconciliation cancels state updates',
+    () async {
+      final secrets = _MemorySecretStore()
+        ..seed('cloud.github.auto-backup-password.v1', 'backup-password');
+      final readGate = Completer<void>();
+      secrets.readGate = readGate;
+      final container = _container(
+        secrets: secrets,
+        github: _FakeGitHubProvider(),
+        cloud: _FakeCloudBackupService(),
+      );
+      final controller = container.read(githubAutoBackupProvider.notifier);
+
+      final scheduled = controller.scheduleAfterAccountAddition(
+        VaultPayload.empty(DateTime.utc(2026, 7, 21)),
+      );
+      await secrets.waitForRead();
+      container.dispose();
+      readGate.complete();
+
+      await expectLater(scheduled, completes);
+    },
+  );
 }
 
 ProviderContainer _container({
