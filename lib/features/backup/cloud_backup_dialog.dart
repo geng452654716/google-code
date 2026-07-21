@@ -34,7 +34,12 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
   @override
   void initState() {
     super.initState();
-    Future<void>.microtask(_refreshGitHubState);
+    Future<void>.microtask(() async {
+      await Future.wait([
+        _refreshGitHubState(),
+        ref.read(githubAutoBackupProvider.notifier).initialize(),
+      ]);
+    });
   }
 
   @override
@@ -45,6 +50,7 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
       return const SizedBox.shrink();
     }
     final providers = ref.watch(cloudBackupProvidersProvider);
+    final autoBackup = ref.watch(githubAutoBackupProvider);
     return AlertDialog(
       title: const Row(
         children: [
@@ -74,13 +80,18 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
                     connection: _githubConnection,
                     isLoading: _loadingGitHub,
                     isProcessing:
-                        _processingProvider == CloudBackupProviderType.github,
-                    disabled: _processingProvider != null,
+                        _processingProvider == CloudBackupProviderType.github ||
+                        autoBackup.isProcessing,
+                    disabled:
+                        _processingProvider != null || autoBackup.isProcessing,
+                    autoBackup: autoBackup,
                     onConnect: () => _connectGitHub(provider),
                     onSelectRepository: () => _selectGitHubRepository(provider),
                     onDisconnect: () => _disconnectGitHub(provider),
                     onUpload: () => _upload(provider),
                     onRestore: () => _restore(provider),
+                    onToggleAutoBackup: (enabled) =>
+                        _toggleGitHubAutoBackup(enabled),
                   )
                 else
                   _CloudProviderCard(
@@ -126,7 +137,7 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: _processingProvider == null
+          onPressed: _processingProvider == null && !autoBackup.isProcessing
               ? () => Navigator.of(context).pop()
               : null,
           child: const Text('关闭'),
@@ -201,6 +212,7 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
       );
       if (!mounted || selected == null) return;
       await provider.selectRepository(selected);
+      await ref.read(githubAutoBackupProvider.notifier).initialize(force: true);
       if (!mounted) return;
       setState(() {
         _message = '已选择 GitHub 私有仓库：${selected.fullName}';
@@ -225,7 +237,9 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
       builder: (context) => _VaultLockDialogGuard(
         child: AlertDialog(
           title: const Text('断开 GitHub？'),
-          content: const Text('这会删除当前设备保存的 GitHub 授权 Token，不会删除仓库中的加密备份。'),
+          content: const Text(
+            '这会删除当前设备保存的 GitHub 授权 Token，并关闭自动备份、删除设备中的自动备份密码；不会删除仓库中的加密备份。',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -243,10 +257,11 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
     if (!mounted || confirmed != true) return;
     _startProcessing(CloudBackupProviderType.github);
     try {
+      await ref.read(githubAutoBackupProvider.notifier).disable();
       await provider.disconnect();
       if (!mounted) return;
       setState(() {
-        _message = '已断开 GitHub，当前设备的授权信息已删除。';
+        _message = '已断开 GitHub，授权信息和自动备份密码已从当前设备删除。';
         _isError = false;
       });
     } on Object {
@@ -255,6 +270,53 @@ class _CloudBackupDialogState extends ConsumerState<CloudBackupDialog> {
       await _refreshGitHubState();
       if (mounted) setState(() => _processingProvider = null);
     }
+  }
+
+  Future<void> _toggleGitHubAutoBackup(bool enabled) async {
+    if (_processingProvider != null) return;
+    final controller = ref.read(githubAutoBackupProvider.notifier);
+    if (!enabled) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => _VaultLockDialogGuard(
+          child: AlertDialog(
+            title: const Text('关闭 GitHub 自动备份？'),
+            content: const Text(
+              '这会删除当前设备系统安全存储中的自动备份密码，不会删除 GitHub 授权或仓库中的加密备份。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const ValueKey('github-auto-backup-disable-confirm'),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+      await controller.disable();
+    } else {
+      final payload = ref.read(vaultSessionProvider).payload;
+      if (payload == null) return;
+      final password = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const _GitHubAutoBackupPasswordDialog(),
+      );
+      if (!mounted || password == null) return;
+      await controller.enable(password: password, payload: payload);
+    }
+    if (!mounted) return;
+    final state = ref.read(githubAutoBackupProvider);
+    setState(() {
+      _message = state.notification;
+      _isError = state.notificationIsError;
+    });
   }
 
   Future<void> _upload(CloudBackupProvider provider) async {
@@ -432,11 +494,13 @@ class _GitHubProviderCard extends StatelessWidget {
     required this.isLoading,
     required this.isProcessing,
     required this.disabled,
+    required this.autoBackup,
     required this.onConnect,
     required this.onSelectRepository,
     required this.onDisconnect,
     required this.onUpload,
     required this.onRestore,
+    required this.onToggleAutoBackup,
   });
 
   final GitHubCloudBackupProvider provider;
@@ -444,11 +508,13 @@ class _GitHubProviderCard extends StatelessWidget {
   final bool isLoading;
   final bool isProcessing;
   final bool disabled;
+  final GitHubAutoBackupState autoBackup;
   final VoidCallback onConnect;
   final VoidCallback onSelectRepository;
   final VoidCallback onDisconnect;
   final VoidCallback onUpload;
   final VoidCallback onRestore;
+  final ValueChanged<bool> onToggleAutoBackup;
 
   @override
   Widget build(BuildContext context) {
@@ -530,7 +596,42 @@ class _GitHubProviderCard extends StatelessWidget {
       description: '${provider.info.description}\n$status',
       trailing: trailing,
       warning: !provider.isConfigured,
+      footer: repository == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: Material(
+                color: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+                  child: SwitchListTile(
+                    key: const ValueKey('github-auto-backup-switch'),
+                    contentPadding: EdgeInsets.zero,
+                    value: autoBackup.isEnabled,
+                    onChanged: disabled ? null : onToggleAutoBackup,
+                    title: const Text('新增账号后自动备份'),
+                    subtitle: Text(
+                      autoBackup.isProcessing
+                          ? '正在创建 GitHub 加密备份…'
+                          : autoBackup.lastSuccessfulAt == null
+                          ? '保存新 GA 后自动上传 .gcbak；备份密码只保存在当前设备。'
+                          : '上次成功：${_formatBackupTime(autoBackup.lastSuccessfulAt!)}',
+                    ),
+                  ),
+                ),
+              ),
+            ),
     );
+  }
+
+  String _formatBackupTime(DateTime value) {
+    final local = value.toLocal();
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
   }
 }
 
@@ -541,6 +642,7 @@ class _ProviderCardShell extends StatelessWidget {
     required this.description,
     required this.trailing,
     this.warning = false,
+    this.footer,
   });
 
   final IconData icon;
@@ -548,51 +650,57 @@ class _ProviderCardShell extends StatelessWidget {
   final String description;
   final Widget trailing;
   final bool warning;
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) => Card(
     margin: EdgeInsets.zero,
     child: Padding(
       padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: warning
-                  ? Theme.of(context).colorScheme.errorContainer
-                  : Theme.of(context).colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              icon,
-              color: warning
-                  ? Theme.of(context).colorScheme.onErrorContainer
-                  : Theme.of(context).colorScheme.primary,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: warning
-                        ? Theme.of(context).colorScheme.error
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: warning
+                      ? Theme.of(context).colorScheme.errorContainer
+                      : Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-              ],
-            ),
+                child: Icon(
+                  icon,
+                  color: warning
+                      ? Theme.of(context).colorScheme.onErrorContainer
+                      : Theme.of(context).colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: warning
+                            ? Theme.of(context).colorScheme.error
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Flexible(child: trailing),
+            ],
           ),
-          const SizedBox(width: 12),
-          Flexible(child: trailing),
+          ?footer,
         ],
       ),
     ),
@@ -922,6 +1030,125 @@ class _CloudBackupPasswordDialogState
   }
 
   /// Clears entered backup passwords before removing the route on Vault lock.
+  void _closeForVaultLock() {
+    if (_closingForLock) return;
+    _closingForLock = true;
+    _password.clear();
+    _confirmation.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final route = ModalRoute.of(context);
+      if (route != null && route.isActive) {
+        Navigator.of(context).removeRoute(route);
+      }
+    });
+  }
+}
+
+class _GitHubAutoBackupPasswordDialog extends ConsumerStatefulWidget {
+  const _GitHubAutoBackupPasswordDialog();
+
+  @override
+  ConsumerState<_GitHubAutoBackupPasswordDialog> createState() =>
+      _GitHubAutoBackupPasswordDialogState();
+}
+
+class _GitHubAutoBackupPasswordDialogState
+    extends ConsumerState<_GitHubAutoBackupPasswordDialog> {
+  final _password = TextEditingController();
+  final _confirmation = TextEditingController();
+  String? _error;
+  bool _closingForLock = false;
+
+  @override
+  void dispose() {
+    _password.clear();
+    _confirmation.clear();
+    _password.dispose();
+    _confirmation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!ref.watch(vaultSessionProvider).isUnlocked) {
+      _closeForVaultLock();
+      return const SizedBox.shrink();
+    }
+    return AlertDialog(
+      title: const Text('开启 GitHub 自动备份'),
+      content: SizedBox(
+        width: 470,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('设置独立恢复密码后，会先备份当前 Vault；以后每次新增 GA 都会自动上传最新加密备份。'),
+            const SizedBox(height: 10),
+            Text(
+              '密码只保存在当前设备的 Keychain 或 Credential Manager，不会写入 Vault、GitHub、备份文件或日志。换电脑恢复时仍需记得此密码。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              key: const ValueKey('github-auto-backup-password'),
+              controller: _password,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '自动备份密码',
+                helperText: '至少 8 个字符，建议与主密码不同',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('github-auto-backup-password-confirmation'),
+              controller: _confirmation,
+              obscureText: true,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(labelText: '确认自动备份密码'),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const ValueKey('github-auto-backup-enable-submit'),
+          onPressed: _submit,
+          child: const Text('开启并立即备份'),
+        ),
+      ],
+    );
+  }
+
+  void _submit() {
+    if (_password.text.length < 8) {
+      setState(() => _error = '自动备份密码至少需要 8 个字符。');
+      return;
+    }
+    if (_password.text != _confirmation.text) {
+      setState(() => _error = '两次输入的自动备份密码不一致。');
+      return;
+    }
+    final value = _password.text;
+    _password.clear();
+    _confirmation.clear();
+    Navigator.of(context).pop(value);
+  }
+
   void _closeForVaultLock() {
     if (_closingForLock) return;
     _closingForLock = true;

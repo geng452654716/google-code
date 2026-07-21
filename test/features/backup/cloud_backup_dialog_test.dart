@@ -11,6 +11,7 @@ import 'package:google_code/platform/cloud_backup/cloud_backup_provider.dart';
 import 'package:google_code/platform/cloud_backup/external_url_launcher.dart';
 import 'package:google_code/platform/cloud_backup/github_api_backup_provider.dart';
 import 'package:google_code/platform/files/backup_file_service.dart';
+import 'package:google_code/platform/security/device_secret_store.dart';
 
 void main() {
   testWidgets('shows all providers and disables an unconfigured GitHub app', (
@@ -51,12 +52,18 @@ void main() {
 
     expect(find.text('owner/totp-backup'), findsOneWidget);
     await tester.tap(find.text('owner/totp-backup'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
 
     expect(github.selectedRepository, 'owner/totp-backup');
     expect(find.textContaining('当前仓库：owner/totp-backup'), findsOneWidget);
     expect(find.byKey(const ValueKey('cloud-upload-github')), findsOneWidget);
     expect(find.byKey(const ValueKey('cloud-restore-github')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('github-auto-backup-switch')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Vault lock closes and cancels GitHub authorization', (
@@ -79,6 +86,37 @@ void main() {
     expect(find.byType(CloudBackupDialog), findsNothing);
     github.authorization.complete();
     await tester.pump();
+  });
+
+  testWidgets('auto-backup switch requests and validates a device password', (
+    tester,
+  ) async {
+    final github = _FakeGitHubProvider(configured: true)
+      ..connected = true
+      ..selectedRepository = 'owner/totp-backup';
+    await _pumpDialog(tester, github: github);
+
+    await tester.tap(find.byKey(const ValueKey('github-auto-backup-switch')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('github-auto-backup-password')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('github-auto-backup-password')),
+      'short',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('github-auto-backup-password-confirmation')),
+      'short',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('github-auto-backup-enable-submit')),
+    );
+    await tester.pump();
+
+    expect(find.text('自动备份密码至少需要 8 个字符。'), findsOneWidget);
   });
 
   testWidgets('Vault lock clears and closes the backup password dialog', (
@@ -160,6 +198,7 @@ Future<ProviderContainer> _pumpDialog(
           ),
         ),
         githubBackupProvider.overrideWithValue(github),
+        deviceSecretStoreProvider.overrideWithValue(_EmptySecretStore()),
         externalUrlLauncherProvider.overrideWithValue(
           launcher ?? _FakeLauncher(),
         ),
@@ -318,4 +357,15 @@ class _FakeLauncher implements ExternalUrlLauncher {
 
   @override
   Future<void> open(Uri uri) async => opened.add(uri);
+}
+
+class _EmptySecretStore implements DeviceSecretStore {
+  @override
+  Future<void> delete(String key) async {}
+
+  @override
+  Future<Uint8List?> read(String key) async => null;
+
+  @override
+  Future<void> write(String key, Uint8List value) async {}
 }

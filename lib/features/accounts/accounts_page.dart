@@ -57,6 +57,7 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_offerQuickUnlockOnboarding());
+      unawaited(ref.read(githubAutoBackupProvider.notifier).initialize());
     });
   }
 
@@ -93,6 +94,20 @@ class _AccountsPageState extends ConsumerState<AccountsPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<GitHubAutoBackupState>(githubAutoBackupProvider, (
+      previous,
+      next,
+    ) {
+      if (next.notificationId == previous?.notificationId ||
+          next.notification == null ||
+          next.notificationSource !=
+              GitHubAutoBackupNotificationSource.accountAddition) {
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showMessage(next.notification!);
+      });
+    });
     final session = ref.watch(vaultSessionProvider);
     final allAccounts = session.payload?.accounts ?? const <Account>[];
     final groups = _AccountGroupView.fromPayload(session.payload?.groups);

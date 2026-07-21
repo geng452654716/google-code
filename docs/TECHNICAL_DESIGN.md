@@ -910,10 +910,23 @@ payload = AES-256-GCM(nonce, ciphertext, mac)
 - 用户最终确认后，由 `BackupService` 生成单个候选 `VaultPayload`，再通过 `VaultSessionController.applyRestoredPayload` 调用当前 `VaultRepository.save` 一次提交。
 - `VaultFileStore` 写入新 envelope 前保留现有 `.bak`，恢复内容使用当前设备已解锁 Vault 的 DEK 和新 nonce 重新加密。
 - repository 保存成功前不替换可见会话 payload；任何失败均保持当前 Vault 不变。
-- 备份密码在一次加解密后立即清空；恢复预览在关闭、应用失焦/后台或 Vault 锁定时释放，锁定时无动画移除恢复路由。
+- 手动导出和恢复的备份密码在一次加解密后立即清空；阶段 26 的可选 GitHub 自动备份是唯一例外，其独立密码只保存到当前设备的 Keychain/Credential Manager。恢复预览在关闭、应用失焦/后台或 Vault 锁定时释放，锁定时无动画移除恢复路由。
 - Dart GC 无法保证字符串物理清零，因此通过短生命周期、无日志、无缓存和不创建明文临时文件降低暴露面。
 
-### 16.5 模块边界
+### 16.5 GitHub 自动备份
+
+阶段 26 在阶段 25 的 GitHub 私有仓库备份上增加“新增账号后自动备份”，首版不扩展到需要用户选择目录的 iCloud Drive 和 Google Drive：
+
+- 功能默认关闭；只有 GitHub 已连接且已选择私有仓库时才显示可用开关。
+- 开启时要求输入并确认至少 8 个字符的独立备份密码，并立即上传一次当前 Vault 验证配置；初次上传失败会删除刚保存的密码并保持关闭。
+- 自动备份密码使用独立 key 保存到当前设备的 Keychain/Credential Manager，不进入 `VaultPayload`、`.gcbak`、GitHub、日志或跨设备同步。
+- 单账号新增与批量导入在本地 Vault 成功保存后异步调度；批量导入只触发一次，编辑、删除、分组、偏好和恢复不触发。
+- 本地保存是主事务，云端失败不得回滚已经新增的账号，只通过不含敏感内容的状态提示告知用户。
+- 连续新增时串行上传；上传期间的新请求只保留最新 `VaultPayload`，避免并发更新同一个 GitHub 文件产生 sha 冲突。
+- 关闭自动备份会删除设备中的自动备份密码，但保留 GitHub Token 和仓库文件；断开 GitHub 会同时删除 Token 和自动备份密码。
+- 新设备不会从 `.gcbak` 获得自动备份开关、GitHub Token 或备份密码，必须重新连接 GitHub并重新开启；恢复旧备份仍需用户记得原独立密码。
+
+### 16.6 模块边界
 
 ```text
 lib/data/backup/backup_envelope.dart

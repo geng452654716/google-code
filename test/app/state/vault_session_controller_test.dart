@@ -140,6 +140,49 @@ void main() {
     expect(repository.saveCount, 1);
   });
 
+  test('schedules one automatic backup per successful account add', () async {
+    final repository = _FakeVaultRepository();
+    final scheduler = _FakeAccountAdditionBackupScheduler();
+    final container = ProviderContainer(
+      overrides: [
+        vaultRepositoryProvider.overrideWithValue(repository),
+        accountAdditionBackupSchedulerProvider.overrideWithValue(scheduler),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(vaultSessionProvider.notifier);
+    await controller.initialize();
+    await controller.createVault('password123', 'password123');
+
+    const first = AccountDraft(
+      issuer: 'Example',
+      accountName: 'alice@example.com',
+      secret: 'JBSWY3DPEHPK3PXP',
+      algorithm: TotpAlgorithm.sha1,
+      digits: 6,
+      periodSeconds: 30,
+    );
+    const second = AccountDraft(
+      issuer: 'Work',
+      accountName: 'bob@example.com',
+      secret: 'GEZDGNBVGY3TQOJQ',
+      algorithm: TotpAlgorithm.sha1,
+      digits: 6,
+      periodSeconds: 30,
+    );
+
+    expect(await controller.addAccount(first), isTrue);
+    expect(await controller.addAccounts([second]), isTrue);
+    expect(scheduler.payloads, hasLength(2));
+    expect(scheduler.payloads.first.accounts, hasLength(1));
+    expect(scheduler.payloads.last.accounts, hasLength(2));
+
+    final accountId = scheduler.payloads.last.accounts.first.id;
+    expect(await controller.updateAccount(accountId, first), isTrue);
+    expect(await controller.deleteAccount(accountId), isTrue);
+    expect(scheduler.payloads, hasLength(2));
+  });
+
   test(
     'creates, renames, assigns, and deletes account groups atomically',
     () async {
@@ -346,5 +389,15 @@ class _FakeVaultRepository implements VaultRepository {
   @override
   void lock() {
     isLocked = true;
+  }
+}
+
+class _FakeAccountAdditionBackupScheduler
+    implements AccountAdditionBackupScheduler {
+  final payloads = <VaultPayload>[];
+
+  @override
+  Future<void> scheduleAfterAccountAddition(VaultPayload payload) async {
+    payloads.add(payload);
   }
 }

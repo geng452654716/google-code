@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -8,6 +10,7 @@ import '../../application/security/quick_unlock_service.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/repositories/vault_repository.dart';
 import 'security_providers.dart';
+import 'github_auto_backup_controller.dart';
 import 'vault_session_state.dart';
 
 /// Coordinates Vault lifecycle and all mutations of unlocked account data.
@@ -218,7 +221,9 @@ class VaultSessionController extends Notifier<VaultSessionState> {
       createdAt: now,
       updatedAt: now,
     );
-    return _persistAccounts([...payload.accounts, account]);
+    final saved = await _persistAccounts([...payload.accounts, account]);
+    _scheduleAutomaticBackupAfterAddition(saved);
+    return saved;
   }
 
   /// Adds a user-confirmed batch in one encrypted Vault transaction.
@@ -270,7 +275,9 @@ class VaultSessionController extends Notifier<VaultSessionState> {
           updatedAt: now,
         ),
     ];
-    return _persistAccounts([...payload.accounts, ...newAccounts]);
+    final saved = await _persistAccounts([...payload.accounts, ...newAccounts]);
+    _scheduleAutomaticBackupAfterAddition(saved);
+    return saved;
   }
 
   /// Replaces editable fields while preserving identity and creation metadata.
@@ -530,6 +537,17 @@ class VaultSessionController extends Notifier<VaultSessionState> {
     if (payload == null) return false;
     return _persistPayload(
       payload.copyWith(accounts: List.unmodifiable(accounts)),
+    );
+  }
+
+  /// Starts a best-effort cloud backup only after an account add was saved.
+  void _scheduleAutomaticBackupAfterAddition(bool saved) {
+    final payload = state.payload;
+    if (!saved || payload == null) return;
+    unawaited(
+      ref
+          .read(accountAdditionBackupSchedulerProvider)
+          .scheduleAfterAccountAddition(payload),
     );
   }
 
