@@ -95,6 +95,22 @@ Client ID 可公开出现在桌面客户端中，不属于私钥；不得提交 
 
 未配置 Client ID 的安装包仍可使用 iCloud Drive 和 Google Drive，GitHub 卡片会明确显示“当前安装包未配置 GitHub App Client ID”。
 
+### 6. GitHub App 与专用备份仓库
+
+已完成个人实测资源配置：
+
+- GitHub App：`TOTP Vault Backup - gengyujian`；
+- App slug：`totp-vault-backup-gengyujian`；
+- App ID：`4352078`；
+- 安装账号：`geng452654716`；
+- Installation ID：`147957358`；
+- 专用私有仓库：`geng452654716/totp-vault-backup`；
+- Repository access：`Only select repositories`；
+- 当前只选择 1 个仓库：`totp-vault-backup`；
+- 权限核对：Metadata 只读、Contents/Code 读写。
+
+GitHub 设置页已显示 installation 更新成功。专用仓库为空，不存放应用源码；后续真机测试只允许上传独立密码加密的 `.gcbak`。
+
 ## GitHub App 配置步骤
 
 1. 在 GitHub 账号设置中进入 `Developer settings > GitHub Apps`。
@@ -134,8 +150,8 @@ Device Flow 不使用 Client Secret；本项目也不需要 GitHub App private k
 ## 尚需外部配置和真机验收
 
 - GitHub App `TOTP Vault Backup - gengyujian` 已创建，已开启 Device Flow、允许 `Any account` 安装，并已将 Client ID 配置到 GitHub Actions Repository Variable；
-- 尚需在用于实测的 GitHub 账号中安装 GitHub App，并仅授权专用私有仓库；
-- 使用 Client ID 重新生成 macOS DMG 和 Windows Setup EXE；
-- macOS 真机验证 GitHub 登录、上传、下载和断开；
+- GitHub App 已安装到 `geng452654716`，并仅授权私有仓库 `geng452654716/totp-vault-backup`；
+- 已使用 Client ID 生成 macOS DMG 和 Windows Setup EXE，并完成 CI 安装、升级和卸载 smoke test；
+- 尚需 macOS 真机验证 GitHub Device Flow 登录、上传、下载、恢复和断开；
 - Windows 10/11 真机验证 Credential Manager、GitHub 登录和恢复；
 - Windows 真机验收结果不能由 CI 编译替代。
